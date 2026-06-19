@@ -20,6 +20,8 @@ public class ContentElement
     public Bitmap? Image { get; set; }
     public double ImageWidth { get; set; }
     public double ImageHeight { get; set; }
+    public string? ImageKey { get; set; }
+    public string? ImageAltText { get; set; }
     public FontFamily Font { get; set; } = FontFamily.Default;
     public double FontSize { get; set; } = 14;
     public bool Bold { get; set; }
@@ -56,6 +58,8 @@ public class ContentElement
             Image = Image,
             ImageWidth = ImageWidth,
             ImageHeight = ImageHeight,
+            ImageKey = ImageKey,
+            ImageAltText = ImageAltText,
             Font = Font,
             FontSize = FontSize,
             Bold = Bold,
