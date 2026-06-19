@@ -431,12 +431,12 @@ public class TodoListEditor : Control
 
                     if (el.Type == ContentElementType.Image && el.Image != null)
                     {
+                        var imgRect = new Rect(segX, segY, seg.Width - 2, seg.Height);
+                        context.DrawImage(el.Image, imgRect);
+
                         bool inSel = IsOffsetInSelection(i, segGlobalStart, selFirst, selLast);
                         if (inSel)
-                            context.FillRectangle(selBrush,
-                                new Rect(segX, segY, seg.Width - 2, seg.Height));
-
-                        context.DrawImage(el.Image, new Rect(segX, segY, seg.Width - 2, seg.Height));
+                            context.FillRectangle(selBrush, imgRect);
                     }
                     else
                     {
