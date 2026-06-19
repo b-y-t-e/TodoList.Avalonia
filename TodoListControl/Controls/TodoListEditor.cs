@@ -48,16 +48,40 @@ public class TodoListEditor : Control
     private const double CheckboxMarginRight = 8;
     private const double LineSpacing = 6;
     private const double InlineImageMaxHeight = 48;
+    private const double WrapLineSpacing = 2;
 
     private readonly List<double> _itemYPositions = new();
     private readonly List<double> _itemHeights = new();
+    private readonly List<List<WrappedLine>> _itemWrapping = new();
     private double _desiredHeight;
     private double _desiredWidth;
+
+    private static readonly SolidColorBrush SelectionBrush =
+        new(Color.FromArgb(80, 30, 144, 255));
 
     private List<List<ContentElement>>? _internalClipboard;
     private string? _internalClipboardText;
 
     public SelectionRange CurrentSelection => new(SelectionAnchor, Caret);
+
+    private class WrappedLine
+    {
+        public double YOffset;
+        public double Height;
+        public int StartGlobalOffset;
+        public int EndGlobalOffset;
+        public readonly List<WrappedSegment> Segments = new();
+    }
+
+    private class WrappedSegment
+    {
+        public int ElementIndex;
+        public int LocalStart;
+        public int LocalEnd;
+        public double X;
+        public double Width;
+        public double Height;
+    }
 
     public TodoListEditor()
     {
@@ -89,34 +113,29 @@ public class TodoListEditor : Control
     {
         _itemYPositions.Clear();
         _itemHeights.Clear();
+        _itemWrapping.Clear();
 
+        double availWidth = Math.Max((_desiredWidth > 0 ? _desiredWidth : 400) - PaddingLeft - PaddingRight, 50);
         double y = PaddingTop;
+
         for (int i = 0; i < Document.Items.Count; i++)
         {
             var item = Document.Items[i];
             _itemYPositions.Add(y);
 
-            double lineH = Document.DefaultFontSize + 4;
-            foreach (var el in item.Elements)
-            {
-                if (el.Type == ContentElementType.Image && el.Image != null)
-                {
-                    double imgH = Math.Min(el.ImageHeight, InlineImageMaxHeight);
-                    lineH = Math.Max(lineH, imgH);
-                }
-                else if (el.Type == ContentElementType.Text && el.Text.Length > 0)
-                {
-                    var typeface = BuildTypeface(el);
-                    double fs = el.FontSize > 0 ? el.FontSize : Document.DefaultFontSize;
-                    var fmt = new FormattedText(el.Text,
-                        System.Globalization.CultureInfo.CurrentCulture,
-                        FlowDirection.LeftToRight, typeface, fs, Brushes.Black);
-                    lineH = Math.Max(lineH, fmt.Height);
-                }
-            }
+            var wrappedLines = ComputeItemWrapping(item, availWidth);
+            _itemWrapping.Add(wrappedLines);
 
-            _itemHeights.Add(lineH);
-            y += lineH + LineSpacing;
+            double itemH = 0;
+            for (int li = 0; li < wrappedLines.Count; li++)
+            {
+                itemH += wrappedLines[li].Height;
+                if (li < wrappedLines.Count - 1) itemH += WrapLineSpacing;
+            }
+            itemH = Math.Max(itemH, Document.DefaultFontSize + 4);
+
+            _itemHeights.Add(itemH);
+            y += itemH + LineSpacing;
         }
 
         _desiredHeight = y + PaddingTop;
@@ -124,15 +143,20 @@ public class TodoListEditor : Control
 
     protected override Size MeasureOverride(Size availableSize)
     {
-        ComputeLayout();
         double w = double.IsInfinity(availableSize.Width) ? 400 : availableSize.Width;
         _desiredWidth = Math.Max(w, 200);
+        ComputeLayout();
         return new Size(_desiredWidth, _desiredHeight);
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
-        _desiredWidth = Math.Max(finalSize.Width, 200);
+        double newWidth = Math.Max(finalSize.Width, 200);
+        if (_itemWrapping.Count == 0 || Math.Abs(newWidth - _desiredWidth) > 0.1)
+        {
+            _desiredWidth = newWidth;
+            ComputeLayout();
+        }
         return new Size(_desiredWidth, Math.Max(finalSize.Height, _desiredHeight));
     }
 
@@ -143,91 +167,87 @@ public class TodoListEditor : Control
         base.Render(context);
         context.FillRectangle(Brushes.White, new Rect(Bounds.Size));
 
-        if (_itemYPositions.Count != Document.Items.Count)
+        if (_itemWrapping.Count != Document.Items.Count)
             ComputeLayout();
 
         var (selFirst, selLast) = CurrentSelection.Ordered();
+        var selBrush = SelectionBrush;
 
         for (int i = 0; i < Document.Items.Count; i++)
         {
             var item = Document.Items[i];
-            double y = _itemYPositions[i];
-            double lineH = _itemHeights[i];
+            double itemY = _itemYPositions[i];
+            var wrappedLines = _itemWrapping[i];
 
-            DrawCheckbox(context, 8, y + 1, item.IsChecked);
-
-            double contentX = PaddingLeft;
-            double x = contentX;
+            DrawCheckbox(context, 8, itemY + 1, item.IsChecked);
 
             if (item.Elements.Count == 0)
             {
                 if (i == Caret.ItemIndex && !HasSelection)
-                    context.FillRectangle(Brushes.Black, new Rect(x, y, 1.5, lineH));
+                    context.FillRectangle(Brushes.Black,
+                        new Rect(PaddingLeft, itemY, 1.5, Document.DefaultFontSize + 4));
+                continue;
             }
-            else
+
+            foreach (var wLine in wrappedLines)
             {
-                int globalOff = 0;
-                for (int ei = 0; ei < item.Elements.Count; ei++)
+                double lineY = itemY + wLine.YOffset;
+
+                foreach (var seg in wLine.Segments)
                 {
-                    var el = item.Elements[ei];
+                    var el = item.Elements[seg.ElementIndex];
+                    double segX = PaddingLeft + seg.X;
+                    int segGlobalStart = item.GlobalOffset(seg.ElementIndex, seg.LocalStart);
+
                     if (el.Type == ContentElementType.Image && el.Image != null)
                     {
-                        double imgH = Math.Min(el.ImageHeight, InlineImageMaxHeight);
-                        double scale = imgH / el.ImageHeight;
-                        double imgW = el.ImageWidth * scale;
-
-                        bool inSel = IsOffsetInSelection(i, globalOff, selFirst, selLast);
+                        bool inSel = IsOffsetInSelection(i, segGlobalStart, selFirst, selLast);
                         if (inSel)
-                            context.FillRectangle(new SolidColorBrush(Color.FromArgb(80, 30, 144, 255)),
-                                new Rect(x, y, imgW, imgH));
+                            context.FillRectangle(selBrush,
+                                new Rect(segX, lineY, seg.Width - 2, seg.Height));
 
-                        context.DrawImage(el.Image, new Rect(x, y, imgW, imgH));
-                        x += imgW + 2;
-                        globalOff += 1;
+                        context.DrawImage(el.Image, new Rect(segX, lineY, seg.Width - 2, seg.Height));
                     }
                     else
                     {
-                        var typeface = BuildTypeface(el);
-                        double fs = el.FontSize > 0 ? el.FontSize : Document.DefaultFontSize;
+                        var (typeface, fs) = ResolveFont(el);
+                        string segText = el.Text[seg.LocalStart..seg.LocalEnd];
 
-                        int selStartInEl = Math.Max(0, (i == selFirst.ItemIndex ? selFirst.Offset : 0) - globalOff);
-                        int selEndInEl = Math.Min(el.Text.Length, (i == selLast.ItemIndex ? selLast.Offset : int.MaxValue) - globalOff);
-                        if (!CurrentSelection.IsEmpty && selStartInEl < selEndInEl
+                        int selStartInSeg = Math.Max(0,
+                            (i == selFirst.ItemIndex ? selFirst.Offset : 0) - segGlobalStart);
+                        int selEndInSeg = Math.Min(segText.Length,
+                            (i == selLast.ItemIndex ? selLast.Offset : int.MaxValue) - segGlobalStart);
+                        if (!CurrentSelection.IsEmpty && selStartInSeg < selEndInSeg
                             && i >= selFirst.ItemIndex && i <= selLast.ItemIndex)
                         {
-                            double selX = selStartInEl > 0
-                                ? MeasureTextWidth(el.Text[..selStartInEl], typeface, fs) : 0;
-                            double selW = MeasureTextWidth(el.Text[selStartInEl..selEndInEl], typeface, fs);
-                            var selBrush = new SolidColorBrush(Color.FromArgb(80, 30, 144, 255));
-                            double selH = fs + 4;
-                            context.FillRectangle(selBrush, new Rect(x + selX, y, selW, selH));
+                            double sX = selStartInSeg > 0
+                                ? MeasureTextWidth(segText[..selStartInSeg], typeface, fs) : 0;
+                            double sW = MeasureTextWidth(segText[selStartInSeg..selEndInSeg], typeface, fs);
+                            context.FillRectangle(selBrush, new Rect(segX + sX, lineY, sW, seg.Height));
                         }
 
-                        var fmt = new FormattedText(
-                            el.Text,
+                        var fmt = new FormattedText(segText,
                             System.Globalization.CultureInfo.CurrentCulture,
                             FlowDirection.LeftToRight, typeface, fs,
                             item.IsChecked ? Brushes.Gray : Brushes.Black);
 
                         if (item.IsChecked)
                         {
-                            double textY = y + fmt.Height / 2;
+                            double textY = lineY + fmt.Height / 2;
                             context.DrawLine(new Pen(Brushes.Gray, 1),
-                                new Point(x, textY), new Point(x + fmt.Width, textY));
+                                new Point(segX, textY), new Point(segX + fmt.Width, textY));
                         }
 
-                        context.DrawText(fmt, new Point(x, y));
-                        globalOff += el.Text.Length;
-                        x += fmt.Width;
+                        context.DrawText(fmt, new Point(segX, lineY));
                     }
                 }
+            }
 
-                if (i == Caret.ItemIndex && !HasSelection)
-                {
-                    double caretX = CalculateCaretX(item, Caret.Offset);
-                    context.FillRectangle(Brushes.Black,
-                        new Rect(contentX + caretX, y, 1.5, lineH));
-                }
+            if (i == Caret.ItemIndex && !HasSelection)
+            {
+                var (caretX, caretYOff, caretLineH) = CalculateCaretPosition(i, Caret.Offset);
+                context.FillRectangle(Brushes.Black,
+                    new Rect(PaddingLeft + caretX, itemY + caretYOff, 1.5, caretLineH));
             }
         }
     }
@@ -260,37 +280,111 @@ public class TodoListEditor : Control
         return true;
     }
 
-    private double CalculateCaretX(TodoItem item, int globalOffset)
+    private (double x, double yOffset, double lineHeight) CalculateCaretPosition(
+        int itemIndex, int globalOffset)
     {
-        double x = 0;
-        int pos = 0;
-        foreach (var el in item.Elements)
+        if (itemIndex >= _itemWrapping.Count)
+            return (0, 0, Document.DefaultFontSize + 4);
+
+        var wrappedLines = _itemWrapping[itemIndex];
+        var item = Document.Items[itemIndex];
+
+        for (int li = 0; li < wrappedLines.Count; li++)
         {
+            var wLine = wrappedLines[li];
+            bool isLastLine = li == wrappedLines.Count - 1;
+
+            if (globalOffset < wLine.EndGlobalOffset
+                || (isLastLine && globalOffset <= wLine.EndGlobalOffset))
+            {
+                foreach (var seg in wLine.Segments)
+                {
+                    int segGlobalStart = item.GlobalOffset(seg.ElementIndex, seg.LocalStart);
+                    int segLen = seg.LocalEnd - seg.LocalStart;
+
+                    if (globalOffset <= segGlobalStart + segLen)
+                    {
+                        int localOff = Math.Max(0, globalOffset - segGlobalStart);
+                        var el = item.Elements[seg.ElementIndex];
+                        double x;
+
+                        if (el.Type == ContentElementType.Image)
+                        {
+                            x = seg.X + (localOff > 0 ? seg.Width : 0);
+                        }
+                        else
+                        {
+                            var (typeface, fs) = ResolveFont(el);
+                            x = seg.X + MeasureTextWidth(
+                                el.Text[seg.LocalStart..(seg.LocalStart + localOff)], typeface, fs);
+                        }
+
+                        return (x, wLine.YOffset, wLine.Height);
+                    }
+                }
+
+                double endX = 0;
+                if (wLine.Segments.Count > 0)
+                {
+                    var lastSeg = wLine.Segments[^1];
+                    endX = lastSeg.X + lastSeg.Width;
+                }
+                return (endX, wLine.YOffset, wLine.Height);
+            }
+        }
+
+        if (wrappedLines.Count > 0)
+        {
+            var lastLine = wrappedLines[^1];
+            double x = 0;
+            if (lastLine.Segments.Count > 0)
+            {
+                var lastSeg = lastLine.Segments[^1];
+                x = lastSeg.X + lastSeg.Width;
+            }
+            return (x, lastLine.YOffset, lastLine.Height);
+        }
+
+        return (0, 0, Document.DefaultFontSize + 4);
+    }
+
+    private int HitTestLineOffset(TodoItem item, WrappedLine wLine, double targetX)
+    {
+        foreach (var seg in wLine.Segments)
+        {
+            var el = item.Elements[seg.ElementIndex];
+            int segGlobalStart = item.GlobalOffset(seg.ElementIndex, seg.LocalStart);
+
             if (el.Type == ContentElementType.Image)
             {
-                if (pos >= globalOffset) return x;
-                double imgH = Math.Min(el.ImageHeight, InlineImageMaxHeight);
-                double scale = imgH / el.ImageHeight;
-                x += el.ImageWidth * scale + 2;
-                pos += 1;
+                if (targetX < seg.X + seg.Width / 2) return segGlobalStart;
+                if (targetX < seg.X + seg.Width) return segGlobalStart + 1;
             }
             else
             {
-                if (globalOffset <= pos + el.Text.Length)
+                var (typeface, fs) = ResolveFont(el);
+                string segText = el.Text[seg.LocalStart..seg.LocalEnd];
+
+                if (targetX <= seg.X + seg.Width)
                 {
-                    int localOff = globalOffset - pos;
-                    var typeface = BuildTypeface(el);
-                    double fs = el.FontSize > 0 ? el.FontSize : Document.DefaultFontSize;
-                    x += MeasureTextWidth(el.Text[..localOff], typeface, fs);
-                    return x;
+                    double cx = seg.X;
+                    for (int ci = 0; ci < segText.Length; ci++)
+                    {
+                        double cw = MeasureTextWidth(segText[ci].ToString(), typeface, fs);
+                        if (targetX < cx + cw / 2) return segGlobalStart + ci;
+                        cx += cw;
+                    }
+                    return segGlobalStart + segText.Length;
                 }
-                var tf = BuildTypeface(el);
-                double fontSize = el.FontSize > 0 ? el.FontSize : Document.DefaultFontSize;
-                x += MeasureTextWidth(el.Text, tf, fontSize);
-                pos += el.Text.Length;
             }
         }
-        return x;
+
+        if (wLine.Segments.Count > 0)
+        {
+            var lastSeg = wLine.Segments[^1];
+            return item.GlobalOffset(lastSeg.ElementIndex, lastSeg.LocalEnd);
+        }
+        return wLine.StartGlobalOffset;
     }
 
     private Typeface BuildTypeface(ContentElement el)
@@ -301,6 +395,12 @@ public class TodoListEditor : Control
             el.Bold ? FontWeight.Bold : FontWeight.Normal);
     }
 
+    private double ResolveFontSize(ContentElement el) =>
+        el.FontSize > 0 ? el.FontSize : Document.DefaultFontSize;
+
+    private (Typeface typeface, double fontSize) ResolveFont(ContentElement el) =>
+        (BuildTypeface(el), ResolveFontSize(el));
+
     private double MeasureTextWidth(string text, Typeface typeface, double fontSize)
     {
         if (text.Length == 0) return 0;
@@ -308,6 +408,146 @@ public class TodoListEditor : Control
             System.Globalization.CultureInfo.CurrentCulture,
             FlowDirection.LeftToRight, typeface, fontSize, Brushes.Black);
         return fmt.Width;
+    }
+
+    // ---- Wrapping ----
+
+    private List<WrappedLine> ComputeItemWrapping(TodoItem item, double availWidth)
+    {
+        var lines = new List<WrappedLine>();
+        var currentLine = new WrappedLine();
+        lines.Add(currentLine);
+        double lineX = 0;
+        double lineH = Document.DefaultFontSize + 4;
+        int globalOff = 0;
+
+        for (int ei = 0; ei < item.Elements.Count; ei++)
+        {
+            var el = item.Elements[ei];
+
+            if (el.Type == ContentElementType.Image && el.Image != null)
+            {
+                double imgH = Math.Min(el.ImageHeight, InlineImageMaxHeight);
+                double scale = imgH / el.ImageHeight;
+                double imgW = el.ImageWidth * scale + 2;
+
+                if (lineX > 0 && lineX + imgW > availWidth)
+                {
+                    currentLine.Height = lineH;
+                    currentLine.EndGlobalOffset = globalOff;
+                    currentLine = new WrappedLine { StartGlobalOffset = globalOff };
+                    lines.Add(currentLine);
+                    lineX = 0;
+                    lineH = Document.DefaultFontSize + 4;
+                }
+
+                currentLine.Segments.Add(new WrappedSegment
+                {
+                    ElementIndex = ei, LocalStart = 0, LocalEnd = 1,
+                    X = lineX, Width = imgW, Height = imgH
+                });
+
+                lineX += imgW;
+                lineH = Math.Max(lineH, imgH);
+                globalOff += 1;
+            }
+            else if (el.Type == ContentElementType.Text && el.Text.Length > 0)
+            {
+                var (typeface, fs) = ResolveFont(el);
+                double textH = fs + 4;
+
+                int textStart = 0;
+                while (textStart < el.Text.Length)
+                {
+                    string remaining = el.Text[textStart..];
+                    double remainingWidth = MeasureTextWidth(remaining, typeface, fs);
+
+                    if (lineX + remainingWidth <= availWidth)
+                    {
+                        currentLine.Segments.Add(new WrappedSegment
+                        {
+                            ElementIndex = ei, LocalStart = textStart, LocalEnd = el.Text.Length,
+                            X = lineX, Width = remainingWidth, Height = textH
+                        });
+                        lineX += remainingWidth;
+                        lineH = Math.Max(lineH, textH);
+                        globalOff += el.Text.Length - textStart;
+                        break;
+                    }
+
+                    double availForText = availWidth - lineX;
+                    int breakPos = FindTextBreakPosition(el.Text, textStart, typeface, fs, availForText);
+
+                    if (breakPos <= textStart)
+                    {
+                        if (currentLine.Segments.Count > 0)
+                        {
+                            currentLine.Height = lineH;
+                            currentLine.EndGlobalOffset = globalOff;
+                            currentLine = new WrappedLine { StartGlobalOffset = globalOff };
+                            lines.Add(currentLine);
+                            lineX = 0;
+                            lineH = Document.DefaultFontSize + 4;
+                            continue;
+                        }
+                        breakPos = textStart + 1;
+                    }
+
+                    string chunk = el.Text[textStart..breakPos];
+                    double chunkWidth = MeasureTextWidth(chunk, typeface, fs);
+
+                    currentLine.Segments.Add(new WrappedSegment
+                    {
+                        ElementIndex = ei, LocalStart = textStart, LocalEnd = breakPos,
+                        X = lineX, Width = chunkWidth, Height = textH
+                    });
+
+                    lineH = Math.Max(lineH, textH);
+                    globalOff += breakPos - textStart;
+                    textStart = breakPos;
+
+                    currentLine.Height = lineH;
+                    currentLine.EndGlobalOffset = globalOff;
+                    currentLine = new WrappedLine { StartGlobalOffset = globalOff };
+                    lines.Add(currentLine);
+                    lineX = 0;
+                    lineH = Document.DefaultFontSize + 4;
+                }
+            }
+        }
+
+        currentLine.Height = lineH;
+        currentLine.EndGlobalOffset = item.TextLength;
+
+        double y = 0;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            lines[i].YOffset = y;
+            y += lines[i].Height;
+            if (i < lines.Count - 1) y += WrapLineSpacing;
+        }
+
+        return lines;
+    }
+
+    private int FindTextBreakPosition(string text, int start, Typeface typeface,
+        double fontSize, double availWidth)
+    {
+        if (availWidth <= 0) return start;
+
+        int lastSpace = -1;
+        double currentWidth = 0;
+        for (int i = start; i < text.Length; i++)
+        {
+            currentWidth += MeasureTextWidth(text[i].ToString(), typeface, fontSize);
+            if (currentWidth > availWidth)
+            {
+                if (lastSpace > start) return lastSpace + 1;
+                return i > start ? i : start;
+            }
+            if (text[i] == ' ') lastSpace = i;
+        }
+        return text.Length;
     }
 
     // ---- Mouse input ----
@@ -382,34 +622,28 @@ public class TodoListEditor : Control
         double relX = pos.X - PaddingLeft;
         if (relX < 0) return new CursorPosition(itemIdx, 0);
 
-        double x = 0;
-        int globalOff = 0;
-        foreach (var el in item.Elements)
+        if (itemIdx >= _itemWrapping.Count)
+            return new CursorPosition(itemIdx, 0);
+
+        var wrappedLines = _itemWrapping[itemIdx];
+        double itemY = _itemYPositions[itemIdx];
+        double relY = pos.Y - itemY;
+
+        WrappedLine? targetLine = null;
+        foreach (var wLine in wrappedLines)
         {
-            if (el.Type == ContentElementType.Image)
+            if (relY < wLine.YOffset + wLine.Height + WrapLineSpacing
+                || wLine == wrappedLines[^1])
             {
-                double imgH = Math.Min(el.ImageHeight, InlineImageMaxHeight);
-                double scale = imgH / el.ImageHeight;
-                double imgW = el.ImageWidth * scale + 2;
-                if (relX < x + imgW / 2) return new CursorPosition(itemIdx, globalOff);
-                if (relX < x + imgW) return new CursorPosition(itemIdx, globalOff + 1);
-                x += imgW;
-                globalOff += 1;
-            }
-            else
-            {
-                var typeface = BuildTypeface(el);
-                double fs = el.FontSize > 0 ? el.FontSize : Document.DefaultFontSize;
-                for (int ci = 0; ci < el.Text.Length; ci++)
-                {
-                    double cw = MeasureTextWidth(el.Text[ci].ToString(), typeface, fs);
-                    if (relX < x + cw / 2) return new CursorPosition(itemIdx, globalOff + ci);
-                    x += cw;
-                }
-                globalOff += el.Text.Length;
+                targetLine = wLine;
+                break;
             }
         }
-        return new CursorPosition(itemIdx, item.TextLength);
+
+        if (targetLine == null || targetLine.Segments.Count == 0)
+            return new CursorPosition(itemIdx, item.TextLength);
+
+        return new CursorPosition(itemIdx, HitTestLineOffset(item, targetLine, relX));
     }
 
     // ---- Keyboard input ----
@@ -1044,12 +1278,78 @@ public class TodoListEditor : Control
         InvalidateMeasure();
     }
 
-    private void MoveCaretVertical(int direction, bool extend)
+    internal void MoveCaretVertical(int direction, bool extend)
     {
-        int newItem = Caret.ItemIndex + direction;
-        newItem = Math.Clamp(newItem, 0, Document.Items.Count - 1);
-        int offset = Math.Min(Caret.Offset, Document.Items[newItem].TextLength);
-        Caret = new CursorPosition(newItem, offset);
+        EnsureValidCaret();
+        int itemIdx = Caret.ItemIndex;
+
+        if (itemIdx < _itemWrapping.Count)
+        {
+            var wrappedLines = _itemWrapping[itemIdx];
+
+            int currentLineIdx = 0;
+            for (int li = 0; li < wrappedLines.Count; li++)
+            {
+                if (Caret.Offset < wrappedLines[li].EndGlobalOffset
+                    || li == wrappedLines.Count - 1)
+                {
+                    currentLineIdx = li;
+                    break;
+                }
+            }
+
+            int targetLineIdx = currentLineIdx + direction;
+
+            if (targetLineIdx >= 0 && targetLineIdx < wrappedLines.Count)
+            {
+                var (caretX, _, _) = CalculateCaretPosition(itemIdx, Caret.Offset);
+                int newOffset = HitTestLineOffset(
+                    Document.Items[itemIdx], wrappedLines[targetLineIdx], caretX);
+                Caret = new CursorPosition(itemIdx, newOffset);
+                if (!extend) SelectionAnchor = Caret;
+                InvalidateMeasure();
+                return;
+            }
+
+            if (direction < 0 && itemIdx > 0)
+            {
+                var (caretX, _, _) = CalculateCaretPosition(itemIdx, Caret.Offset);
+                int prevIdx = itemIdx - 1;
+                if (prevIdx < _itemWrapping.Count && _itemWrapping[prevIdx].Count > 0)
+                {
+                    int newOffset = HitTestLineOffset(
+                        Document.Items[prevIdx], _itemWrapping[prevIdx][^1], caretX);
+                    Caret = new CursorPosition(prevIdx, newOffset);
+                }
+                else
+                {
+                    Caret = new CursorPosition(prevIdx, Document.Items[prevIdx].TextLength);
+                }
+            }
+            else if (direction > 0 && itemIdx < Document.Items.Count - 1)
+            {
+                var (caretX, _, _) = CalculateCaretPosition(itemIdx, Caret.Offset);
+                int nextIdx = itemIdx + 1;
+                if (nextIdx < _itemWrapping.Count && _itemWrapping[nextIdx].Count > 0)
+                {
+                    int newOffset = HitTestLineOffset(
+                        Document.Items[nextIdx], _itemWrapping[nextIdx][0], caretX);
+                    Caret = new CursorPosition(nextIdx, newOffset);
+                }
+                else
+                {
+                    Caret = new CursorPosition(nextIdx, 0);
+                }
+            }
+        }
+        else
+        {
+            int newItem = Caret.ItemIndex + direction;
+            newItem = Math.Clamp(newItem, 0, Document.Items.Count - 1);
+            int offset = Math.Min(Caret.Offset, Document.Items[newItem].TextLength);
+            Caret = new CursorPosition(newItem, offset);
+        }
+
         if (!extend) SelectionAnchor = Caret;
         InvalidateMeasure();
     }

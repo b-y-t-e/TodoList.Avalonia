@@ -10,4 +10,8 @@
     <PackageReference Include="Avalonia" Version="11.3.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="TodoListControl.Tests" />
+  </ItemGroup>
+
 </Project>

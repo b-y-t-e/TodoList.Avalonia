@@ -435,6 +435,199 @@ public class TodoListEditorTests
         Assert.That(editor.Document.Items[2].IsChecked, Is.True);
     }
 
+    // ---- Text wrapping tests ----
+
+    [AvaloniaTest]
+    public void LongTextWrapsWithinNarrowEditor()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontSize = 14;
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        editor.InsertTextAtCaret("This is a very long text that should wrap to multiple lines in a narrow editor");
+
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        var item = editor.Document.Items[0];
+        Assert.That(item.PlainText.Length, Is.GreaterThan(20));
+        Assert.That(editor.GetText(), Does.Contain("very long text"));
+    }
+
+    [AvaloniaTest]
+    public void LongTextRemainsOneItemAfterWrapping()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontSize = 14;
+        editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD EEEE FFFF GGGG HHHH");
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        Assert.That(editor.Document.Items.Count, Is.EqualTo(1));
+        Assert.That(editor.Caret.ItemIndex, Is.EqualTo(0));
+        Assert.That(editor.Caret.Offset, Is.EqualTo(39));
+    }
+
+    [AvaloniaTest]
+    public void SelectionAcrossWrappedLinesWorks()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontSize = 14;
+        editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD EEEE FFFF");
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        editor.SelectionAnchor = new CursorPosition(0, 5);
+        editor.Caret = new CursorPosition(0, 25);
+
+        Assert.That(editor.HasSelection, Is.True);
+        Assert.That(editor.GetSelectedText(), Is.EqualTo("BBBB CCCC DDDD EEEE "));
+    }
+
+    [AvaloniaTest]
+    public void DeleteSelectionInWrappedTextWorks()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontSize = 14;
+        editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD");
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        editor.SelectionAnchor = new CursorPosition(0, 5);
+        editor.Caret = new CursorPosition(0, 15);
+        editor.DeleteSelection();
+
+        Assert.That(editor.GetText(), Is.EqualTo("AAAA DDDD"));
+    }
+
+    [AvaloniaTest]
+    public void InsertTextInWrappedItemWorks()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontSize = 14;
+        editor.InsertTextAtCaret("AAAA CCCC");
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        editor.Caret = new CursorPosition(0, 5);
+        editor.SelectionAnchor = editor.Caret;
+        editor.InsertTextAtCaret("BBBB ");
+
+        Assert.That(editor.GetText(), Is.EqualTo("AAAA BBBB CCCC"));
+    }
+
+    [AvaloniaTest]
+    public void SplitItemInWrappedTextWorks()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontSize = 14;
+        editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD");
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        editor.Caret = new CursorPosition(0, 10);
+        editor.SelectionAnchor = editor.Caret;
+        editor.SplitItemAtCaret();
+
+        Assert.That(editor.Document.Items.Count, Is.EqualTo(2));
+        Assert.That(editor.Document.Items[0].PlainText, Is.EqualTo("AAAA BBBB "));
+        Assert.That(editor.Document.Items[1].PlainText, Is.EqualTo("CCCC DDDD"));
+    }
+
+    [AvaloniaTest]
+    public void ImageInWrappedLineDoesNotCrash()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontSize = 14;
+        editor.InsertTextAtCaret("Before image ");
+        editor.InsertImageAtCaret(CreateTestBitmap());
+        editor.InsertTextAtCaret(" After image text that is long enough to wrap");
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        Assert.That(editor.Document.Items[0].Elements.Count, Is.GreaterThanOrEqualTo(3));
+        Assert.That(editor.GetText(), Does.Contain("Before image"));
+    }
+
+    [AvaloniaTest]
+    public void MoveCaretDownNavigatesWrappedLines()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontSize = 14;
+        editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD EEEE FFFF");
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        editor.Caret = new CursorPosition(0, 2);
+        editor.SelectionAnchor = editor.Caret;
+
+        editor.MoveCaretVertical(1, false);
+
+        Assert.That(editor.Caret.ItemIndex, Is.EqualTo(0));
+        Assert.That(editor.Caret.Offset, Is.GreaterThan(2));
+    }
+
+    [AvaloniaTest]
+    public void MoveCaretUpNavigatesWrappedLines()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontSize = 14;
+        editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD EEEE FFFF");
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        int endOffset = editor.Document.Items[0].TextLength;
+        editor.Caret = new CursorPosition(0, endOffset);
+        editor.SelectionAnchor = editor.Caret;
+
+        editor.MoveCaretVertical(-1, false);
+
+        Assert.That(editor.Caret.ItemIndex, Is.EqualTo(0));
+        Assert.That(editor.Caret.Offset, Is.LessThan(endOffset));
+    }
+
+    [AvaloniaTest]
+    public void MoveCaretDownFromLastWrappedLineGoesToNextItem()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontSize = 14;
+        editor.SetText("AAAA BBBB CCCC DDDD EEEE FFFF\nSecond");
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        int lastOffset = editor.Document.Items[0].TextLength;
+        editor.Caret = new CursorPosition(0, lastOffset);
+        editor.SelectionAnchor = editor.Caret;
+
+        editor.MoveCaretVertical(1, false);
+
+        Assert.That(editor.Caret.ItemIndex, Is.EqualTo(1));
+    }
+
+    [AvaloniaTest]
+    public void MoveCaretUpFromFirstWrappedLineGoesToPreviousItem()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontSize = 14;
+        editor.SetText("First\nAAAA BBBB CCCC DDDD EEEE FFFF");
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        editor.Caret = new CursorPosition(1, 2);
+        editor.SelectionAnchor = editor.Caret;
+
+        editor.MoveCaretVertical(-1, false);
+
+        Assert.That(editor.Caret.ItemIndex, Is.EqualTo(0));
+    }
+
+    [AvaloniaTest]
+    public void MoveCaretVerticalWithShiftExtendsSelection()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontSize = 14;
+        editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD EEEE FFFF");
+        editor.Measure(new Avalonia.Size(150, 600));
+
+        editor.Caret = new CursorPosition(0, 2);
+        editor.SelectionAnchor = new CursorPosition(0, 2);
+
+        editor.MoveCaretVertical(1, true);
+
+        Assert.That(editor.HasSelection, Is.True);
+        Assert.That(editor.SelectionAnchor.Offset, Is.EqualTo(2));
+        Assert.That(editor.Caret.Offset, Is.GreaterThan(2));
+    }
+
     private static Bitmap CreateTestBitmap()
     {
         return new WriteableBitmap(
