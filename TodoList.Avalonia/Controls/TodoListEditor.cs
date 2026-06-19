@@ -17,6 +17,8 @@ using TodoList.Avalonia.Model;
 
 namespace TodoList.Avalonia.Controls;
 
+public enum ImageDisplayMode { Inline, Block }
+
 public class TodoListEditor : Control
 {
     public static readonly StyledProperty<FontFamily> DefaultFontProperty =
@@ -30,6 +32,38 @@ public class TodoListEditor : Control
 
     public static readonly StyledProperty<double> InlineImageMaxHeightProperty =
         AvaloniaProperty.Register<TodoListEditor, double>(nameof(InlineImageMaxHeight), 48.0);
+
+    public static readonly StyledProperty<ImageDisplayMode> ImageDisplayProperty =
+        AvaloniaProperty.Register<TodoListEditor, ImageDisplayMode>(
+            nameof(ImageDisplay), ImageDisplayMode.Inline);
+
+    public static readonly StyledProperty<IBrush> BackgroundBrushProperty =
+        AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(BackgroundBrush), Brushes.White);
+
+    public static readonly StyledProperty<IBrush> ForegroundProperty =
+        AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(Foreground), Brushes.Black);
+
+    public static readonly StyledProperty<IBrush> CheckedForegroundProperty =
+        AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(CheckedForeground), Brushes.Gray);
+
+    public static readonly StyledProperty<IBrush> SelectionBrushProperty =
+        AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(SelectionBrush),
+            new SolidColorBrush(Color.FromArgb(80, 30, 144, 255)));
+
+    public static readonly StyledProperty<IBrush> CaretBrushProperty =
+        AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(CaretBrush), Brushes.Black);
+
+    public static readonly StyledProperty<IBrush> CheckboxCheckedBrushProperty =
+        AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(CheckboxCheckedBrush), Brushes.DodgerBlue);
+
+    public static readonly StyledProperty<IBrush> CheckboxUncheckedBrushProperty =
+        AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(CheckboxUncheckedBrush), Brushes.White);
+
+    public static readonly StyledProperty<IBrush> CheckboxBorderBrushProperty =
+        AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(CheckboxBorderBrush), Brushes.Gray);
+
+    public static readonly StyledProperty<IBrush> CheckmarkBrushProperty =
+        AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(CheckmarkBrush), Brushes.White);
 
     public FontFamily DefaultFont
     {
@@ -53,6 +87,66 @@ public class TodoListEditor : Control
     {
         get => GetValue(InlineImageMaxHeightProperty);
         set => SetValue(InlineImageMaxHeightProperty, value);
+    }
+
+    public ImageDisplayMode ImageDisplay
+    {
+        get => GetValue(ImageDisplayProperty);
+        set => SetValue(ImageDisplayProperty, value);
+    }
+
+    public IBrush BackgroundBrush
+    {
+        get => GetValue(BackgroundBrushProperty);
+        set => SetValue(BackgroundBrushProperty, value);
+    }
+
+    public IBrush Foreground
+    {
+        get => GetValue(ForegroundProperty);
+        set => SetValue(ForegroundProperty, value);
+    }
+
+    public IBrush CheckedForeground
+    {
+        get => GetValue(CheckedForegroundProperty);
+        set => SetValue(CheckedForegroundProperty, value);
+    }
+
+    public IBrush SelectionBrush
+    {
+        get => GetValue(SelectionBrushProperty);
+        set => SetValue(SelectionBrushProperty, value);
+    }
+
+    public IBrush CaretBrush
+    {
+        get => GetValue(CaretBrushProperty);
+        set => SetValue(CaretBrushProperty, value);
+    }
+
+    public IBrush CheckboxCheckedBrush
+    {
+        get => GetValue(CheckboxCheckedBrushProperty);
+        set => SetValue(CheckboxCheckedBrushProperty, value);
+    }
+
+    public IBrush CheckboxUncheckedBrush
+    {
+        get => GetValue(CheckboxUncheckedBrushProperty);
+        set => SetValue(CheckboxUncheckedBrushProperty, value);
+    }
+
+    public IBrush CheckboxBorderBrush
+    {
+        get => GetValue(CheckboxBorderBrushProperty);
+        set => SetValue(CheckboxBorderBrushProperty, value);
+    }
+
+    public IBrush CheckmarkBrush
+    {
+        get => GetValue(CheckmarkBrushProperty);
+        set => SetValue(CheckmarkBrushProperty, value);
     }
 
     public Dictionary<string, Bitmap> ImageStore { get; } = new();
@@ -79,9 +173,6 @@ public class TodoListEditor : Control
     private readonly List<List<WrappedLine>> _itemWrapping = new();
     private double _desiredHeight;
     private double _desiredWidth;
-
-    private static readonly SolidColorBrush SelectionBrush =
-        new(Color.FromArgb(80, 30, 144, 255));
 
     private List<List<ContentElement>>? _internalClipboard;
     private string? _internalClipboardText;
@@ -169,9 +260,22 @@ public class TodoListEditor : Control
             SyncDocumentDefaults();
             InvalidateMeasure();
         }
-        else if (change.Property == InlineImageMaxHeightProperty)
+        else if (change.Property == InlineImageMaxHeightProperty
+            || change.Property == ImageDisplayProperty)
         {
             InvalidateMeasure();
+        }
+        else if (change.Property == BackgroundBrushProperty
+            || change.Property == ForegroundProperty
+            || change.Property == CheckedForegroundProperty
+            || change.Property == SelectionBrushProperty
+            || change.Property == CaretBrushProperty
+            || change.Property == CheckboxCheckedBrushProperty
+            || change.Property == CheckboxUncheckedBrushProperty
+            || change.Property == CheckboxBorderBrushProperty
+            || change.Property == CheckmarkBrushProperty)
+        {
+            InvalidateVisual();
         }
         else if (change.Property == ItemsProperty)
         {
@@ -245,7 +349,7 @@ public class TodoListEditor : Control
     public override void Render(DrawingContext context)
     {
         base.Render(context);
-        context.FillRectangle(Brushes.White, new Rect(Bounds.Size));
+        context.FillRectangle(BackgroundBrush, new Rect(Bounds.Size));
 
         if (_itemWrapping.Count != Document.Items.Count)
             ComputeLayout();
@@ -264,7 +368,7 @@ public class TodoListEditor : Control
             if (item.Elements.Count == 0)
             {
                 if (i == Caret.ItemIndex && !HasSelection)
-                    context.FillRectangle(Brushes.Black,
+                    context.FillRectangle(CaretBrush,
                         new Rect(PaddingLeft, itemY, 1.5, Document.DefaultFontSize + 4));
                 continue;
             }
@@ -309,12 +413,12 @@ public class TodoListEditor : Control
                         var fmt = new FormattedText(segText,
                             System.Globalization.CultureInfo.CurrentCulture,
                             FlowDirection.LeftToRight, typeface, fs,
-                            item.IsChecked ? Brushes.Gray : Brushes.Black);
+                            item.IsChecked ? CheckedForeground : Foreground);
 
                         if (item.IsChecked)
                         {
                             double textY = lineY + fmt.Height / 2;
-                            context.DrawLine(new Pen(Brushes.Gray, 1),
+                            context.DrawLine(new Pen(CheckedForeground, 1),
                                 new Point(segX, textY), new Point(segX + fmt.Width, textY));
                         }
 
@@ -326,7 +430,7 @@ public class TodoListEditor : Control
             if (i == Caret.ItemIndex && !HasSelection)
             {
                 var (caretX, caretYOff, caretLineH) = CalculateCaretPosition(i, Caret.Offset);
-                context.FillRectangle(Brushes.Black,
+                context.FillRectangle(CaretBrush,
                     new Rect(PaddingLeft + caretX, itemY + caretYOff, 1.5, caretLineH));
             }
         }
@@ -335,12 +439,12 @@ public class TodoListEditor : Control
     private void DrawCheckbox(DrawingContext ctx, double x, double y, bool isChecked)
     {
         var rect = new Rect(x, y, CheckboxSize, CheckboxSize);
-        ctx.FillRectangle(isChecked ? Brushes.DodgerBlue : Brushes.White, rect);
-        ctx.DrawRectangle(new Pen(Brushes.Gray, 1.5), rect);
+        ctx.FillRectangle(isChecked ? CheckboxCheckedBrush : CheckboxUncheckedBrush, rect);
+        ctx.DrawRectangle(new Pen(CheckboxBorderBrush, 1.5), rect);
 
         if (isChecked)
         {
-            var pen = new Pen(Brushes.White, 2);
+            var pen = new Pen(CheckmarkBrush, 2);
             ctx.DrawLine(pen, new Point(x + 3, y + 8), new Point(x + 6, y + 12));
             ctx.DrawLine(pen, new Point(x + 6, y + 12), new Point(x + 13, y + 4));
         }
@@ -498,7 +602,7 @@ public class TodoListEditor : Control
         if (text.Length == 0) return 0;
         var fmt = new FormattedText(text,
             System.Globalization.CultureInfo.CurrentCulture,
-            FlowDirection.LeftToRight, typeface, fontSize, Brushes.Black);
+            FlowDirection.LeftToRight, typeface, fontSize, Foreground);
         return fmt.Width;
     }
 
