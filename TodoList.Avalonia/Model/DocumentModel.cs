@@ -68,6 +68,8 @@ public class ContentElement
     }
 }
 
+internal enum CharClass { Whitespace, Word, Punctuation, Image }
+
 public class TodoItem
 {
     public bool IsChecked { get; set; }
@@ -139,6 +141,69 @@ public class TodoItem
         for (int i = 0; i < elementIndex && i < Elements.Count; i++)
             pos += Elements[i].Type == ContentElementType.Text ? Elements[i].Text.Length : 1;
         return pos + offsetInElement;
+    }
+
+    internal CharClass ClassifyAt(int globalOffset)
+    {
+        if (globalOffset < 0 || globalOffset >= TextLength)
+            return CharClass.Whitespace;
+
+        var (elIdx, localOff) = ResolveOffset(globalOffset);
+        var el = Elements[elIdx];
+
+        if (el.Type == ContentElementType.Image)
+            return CharClass.Image;
+
+        char c = el.Text[localOff];
+        if (char.IsWhiteSpace(c)) return CharClass.Whitespace;
+        if (char.IsLetterOrDigit(c) || c == '_') return CharClass.Word;
+        return CharClass.Punctuation;
+    }
+
+    public int FindWordBoundaryLeft(int fromOffset)
+    {
+        if (fromOffset <= 0) return 0;
+
+        int pos = fromOffset - 1;
+
+        // Skip whitespace
+        while (pos > 0 && ClassifyAt(pos) == CharClass.Whitespace)
+            pos--;
+
+        if (pos <= 0)
+            return ClassifyAt(0) == CharClass.Whitespace ? 0 : 0;
+
+        var cls = ClassifyAt(pos);
+        if (cls == CharClass.Image)
+            return pos;
+
+        // Skip same class
+        while (pos > 0 && ClassifyAt(pos - 1) == cls)
+            pos--;
+
+        return pos;
+    }
+
+    public int FindWordBoundaryRight(int fromOffset)
+    {
+        int len = TextLength;
+        if (fromOffset >= len) return len;
+
+        int pos = fromOffset;
+
+        var cls = ClassifyAt(pos);
+        if (cls == CharClass.Image)
+            return pos + 1;
+
+        // Skip same class
+        while (pos < len && ClassifyAt(pos) == cls)
+            pos++;
+
+        // Skip whitespace
+        while (pos < len && ClassifyAt(pos) == CharClass.Whitespace)
+            pos++;
+
+        return pos;
     }
 }
 

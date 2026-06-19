@@ -197,6 +197,91 @@ public class DocumentModelTests
         Assert.That(localOff, Is.EqualTo(0));
     }
 
+    // ---- Word boundary tests ----
+
+    [Test]
+    public void FindWordBoundaryRight_SimpleWord()
+    {
+        var item = new TodoItem("Hello World");
+        Assert.That(item.FindWordBoundaryRight(0), Is.EqualTo(6)); // skip "Hello" + space
+    }
+
+    [Test]
+    public void FindWordBoundaryRight_FromMiddleOfWord()
+    {
+        var item = new TodoItem("Hello World");
+        Assert.That(item.FindWordBoundaryRight(2), Is.EqualTo(6)); // skip "llo" + space
+    }
+
+    [Test]
+    public void FindWordBoundaryRight_FromSpace()
+    {
+        var item = new TodoItem("Hello World");
+        Assert.That(item.FindWordBoundaryRight(5), Is.EqualTo(6)); // skip space
+    }
+
+    [Test]
+    public void FindWordBoundaryRight_AtEnd()
+    {
+        var item = new TodoItem("Hello");
+        Assert.That(item.FindWordBoundaryRight(5), Is.EqualTo(5));
+    }
+
+    [Test]
+    public void FindWordBoundaryRight_Punctuation()
+    {
+        var item = new TodoItem("foo.bar");
+        Assert.That(item.FindWordBoundaryRight(0), Is.EqualTo(3)); // stops at punctuation
+    }
+
+    [AvaloniaTest]
+    public void FindWordBoundaryRight_Image()
+    {
+        var item = new TodoItem();
+        item.Elements.Add(ContentElement.CreateText("AB"));
+        item.Elements.Add(ContentElement.CreateImage(CreateTestBitmap()));
+        item.Elements.Add(ContentElement.CreateText("CD"));
+        Assert.That(item.FindWordBoundaryRight(2), Is.EqualTo(3)); // image is 1 step
+    }
+
+    [Test]
+    public void FindWordBoundaryLeft_SimpleWord()
+    {
+        var item = new TodoItem("Hello World");
+        Assert.That(item.FindWordBoundaryLeft(11), Is.EqualTo(6)); // back to start of "World"
+    }
+
+    [Test]
+    public void FindWordBoundaryLeft_FromSpace()
+    {
+        var item = new TodoItem("Hello World");
+        Assert.That(item.FindWordBoundaryLeft(6), Is.EqualTo(0)); // skip space + "Hello"
+    }
+
+    [Test]
+    public void FindWordBoundaryLeft_AtStart()
+    {
+        var item = new TodoItem("Hello");
+        Assert.That(item.FindWordBoundaryLeft(0), Is.EqualTo(0));
+    }
+
+    [Test]
+    public void FindWordBoundaryLeft_Punctuation()
+    {
+        var item = new TodoItem("foo.bar");
+        Assert.That(item.FindWordBoundaryLeft(7), Is.EqualTo(4)); // back to start of "bar"
+    }
+
+    [AvaloniaTest]
+    public void FindWordBoundaryLeft_Image()
+    {
+        var item = new TodoItem();
+        item.Elements.Add(ContentElement.CreateText("AB"));
+        item.Elements.Add(ContentElement.CreateImage(CreateTestBitmap()));
+        item.Elements.Add(ContentElement.CreateText("CD"));
+        Assert.That(item.FindWordBoundaryLeft(3), Is.EqualTo(2)); // image boundary
+    }
+
     private static global::Avalonia.Media.Imaging.Bitmap CreateTestBitmap()
     {
         return new global::Avalonia.Media.Imaging.WriteableBitmap(

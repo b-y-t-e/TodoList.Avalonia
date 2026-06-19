@@ -31,7 +31,7 @@ public class TodoListEditor : Control
         AvaloniaProperty.Register<TodoListEditor, IList<TodoItemData>?>(nameof(Items));
 
     public static readonly StyledProperty<double> InlineImageMaxHeightProperty =
-        AvaloniaProperty.Register<TodoListEditor, double>(nameof(InlineImageMaxHeight), 48.0);
+        AvaloniaProperty.Register<TodoListEditor, double>(nameof(InlineImageMaxHeight), 100.0);
 
     public static readonly StyledProperty<ImageDisplayMode> ImageDisplayProperty =
         AvaloniaProperty.Register<TodoListEditor, ImageDisplayMode>(
@@ -941,12 +941,30 @@ public class TodoListEditor : Control
                 e.Handled = true;
                 break;
 
+            case Key.Back when ctrl:
+                SaveUndoState();
+                if (HasSelection)
+                    DeleteSelection();
+                else
+                    DeleteWordBackward();
+                e.Handled = true;
+                break;
+
             case Key.Back:
                 SaveUndoState(HasSelection ? UndoActionKind.Other : UndoActionKind.Backspace);
                 if (HasSelection)
                     DeleteSelection();
                 else
                     HandleBackspace();
+                e.Handled = true;
+                break;
+
+            case Key.Delete when ctrl:
+                SaveUndoState();
+                if (HasSelection)
+                    DeleteSelection();
+                else
+                    DeleteWordForward();
                 e.Handled = true;
                 break;
 
@@ -959,8 +977,18 @@ public class TodoListEditor : Control
                 e.Handled = true;
                 break;
 
+            case Key.Left when ctrl:
+                MoveCaretByWord(-1, shift);
+                e.Handled = true;
+                break;
+
             case Key.Left:
                 MoveCaret(-1, shift);
+                e.Handled = true;
+                break;
+
+            case Key.Right when ctrl:
+                MoveCaretByWord(1, shift);
                 e.Handled = true;
                 break;
 
@@ -979,10 +1007,27 @@ public class TodoListEditor : Control
                 e.Handled = true;
                 break;
 
+            case Key.Home when ctrl:
+                var docStart = CursorPosition.Start;
+                if (!shift) SelectionAnchor = docStart;
+                Caret = docStart;
+                InvalidateMeasure();
+                e.Handled = true;
+                break;
+
             case Key.Home:
                 var home = new CursorPosition(Caret.ItemIndex, 0);
                 if (!shift) SelectionAnchor = home;
                 Caret = home;
+                InvalidateMeasure();
+                e.Handled = true;
+                break;
+
+            case Key.End when ctrl:
+                var lastItem = Document.Items[^1];
+                var docEnd = new CursorPosition(Document.Items.Count - 1, lastItem.TextLength);
+                if (!shift) SelectionAnchor = docEnd;
+                Caret = docEnd;
                 InvalidateMeasure();
                 e.Handled = true;
                 break;
@@ -1242,6 +1287,7 @@ public class TodoListEditor : Control
             Document.Items.RemoveAt(Caret.ItemIndex + 1);
         }
 
+        ClearSelectionNoDelete();
         InvalidateMeasure();
         NotifyDocumentChanged();
     }
@@ -1287,15 +1333,15 @@ public class TodoListEditor : Control
         if (fromOffset >= toOffset) return;
 
         int pos = 0;
-        for (int i = 0; i < item.Elements.Count; i++)
+        for (int i = item.Elements.Count - 1; i >= 0; i--)
         {
+            pos = item.GlobalOffset(i, 0);
             var el = item.Elements[i];
             int elLen = el.Type == ContentElementType.Text ? el.Text.Length : 1;
             int elStart = pos;
             int elEnd = pos + elLen;
 
-            if (elEnd <= fromOffset) { pos += elLen; continue; }
-            if (elStart >= toOffset) break;
+            if (elEnd <= fromOffset || elStart >= toOffset) continue;
 
             int delStart = Math.Max(fromOffset - elStart, 0);
             int delEnd = Math.Min(toOffset - elStart, elLen);
@@ -1303,14 +1349,12 @@ public class TodoListEditor : Control
             if (el.Type == ContentElementType.Text)
             {
                 el.Text = el.Text[..delStart] + el.Text[delEnd..];
-                if (el.Text.Length == 0) { item.Elements.RemoveAt(i); i--; }
+                if (el.Text.Length == 0) item.Elements.RemoveAt(i);
             }
             else
             {
-                item.Elements.RemoveAt(i); i--;
+                item.Elements.RemoveAt(i);
             }
-
-            pos = elStart;
         }
     }
 
@@ -1573,6 +1617,92 @@ public class TodoListEditor : Control
         Caret = newPos;
         if (!extend) SelectionAnchor = Caret;
         InvalidateMeasure();
+    }
+
+    internal void MoveCaretByWord(int direction, bool extend)
+    {
+        EnsureValidCaret();
+        var item = Document.Items[Caret.ItemIndex];
+
+        if (direction < 0)
+        {
+            int boundary = item.FindWordBoundaryLeft(Caret.Offset);
+            if (boundary == Caret.Offset && Caret.Offset == 0 && Caret.ItemIndex > 0)
+            {
+                var prev = Document.Items[Caret.ItemIndex - 1];
+                Caret = new CursorPosition(Caret.ItemIndex - 1, prev.TextLength);
+            }
+            else
+            {
+                Caret = new CursorPosition(Caret.ItemIndex, boundary);
+            }
+        }
+        else
+        {
+            int boundary = item.FindWordBoundaryRight(Caret.Offset);
+            if (boundary == Caret.Offset && Caret.Offset == item.TextLength
+                && Caret.ItemIndex < Document.Items.Count - 1)
+            {
+                Caret = new CursorPosition(Caret.ItemIndex + 1, 0);
+            }
+            else
+            {
+                Caret = new CursorPosition(Caret.ItemIndex, boundary);
+            }
+        }
+
+        if (!extend) SelectionAnchor = Caret;
+        InvalidateMeasure();
+    }
+
+    private void DeleteWordBackward()
+    {
+        EnsureValidCaret();
+        var item = Document.Items[Caret.ItemIndex];
+
+        if (Caret.Offset > 0)
+        {
+            int boundary = item.FindWordBoundaryLeft(Caret.Offset);
+            int offset = Math.Min(Caret.Offset, item.TextLength);
+            DeleteRange(item, boundary, offset);
+            Caret = new CursorPosition(Caret.ItemIndex, boundary);
+        }
+        else if (Caret.ItemIndex > 0)
+        {
+            var prevItem = Document.Items[Caret.ItemIndex - 1];
+            int prevLen = prevItem.TextLength;
+            foreach (var el in item.Elements)
+                prevItem.Elements.Add(el);
+            Document.Items.RemoveAt(Caret.ItemIndex);
+            Caret = new CursorPosition(Caret.ItemIndex - 1, prevLen);
+        }
+
+        ClearSelectionNoDelete();
+        InvalidateMeasure();
+        NotifyDocumentChanged();
+    }
+
+    private void DeleteWordForward()
+    {
+        EnsureValidCaret();
+        var item = Document.Items[Caret.ItemIndex];
+
+        if (Caret.Offset < item.TextLength)
+        {
+            int boundary = item.FindWordBoundaryRight(Caret.Offset);
+            DeleteRange(item, Caret.Offset, boundary);
+        }
+        else if (Caret.ItemIndex < Document.Items.Count - 1)
+        {
+            var nextItem = Document.Items[Caret.ItemIndex + 1];
+            foreach (var el in nextItem.Elements)
+                item.Elements.Add(el);
+            Document.Items.RemoveAt(Caret.ItemIndex + 1);
+        }
+
+        ClearSelectionNoDelete();
+        InvalidateMeasure();
+        NotifyDocumentChanged();
     }
 
     internal void MoveCaretVertical(int direction, bool extend)

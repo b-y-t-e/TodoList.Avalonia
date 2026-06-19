@@ -1053,6 +1053,99 @@ public class TodoListEditorTests
         Assert.That(items[0].Text, Is.EqualTo("FirstSecond"));
     }
 
+    // ---- DeleteRange bug regression test ----
+
+    [AvaloniaTest]
+    public void DeleteRange_DoesNotDeleteAdjacentImage()
+    {
+        var editor = new TodoListEditor();
+        editor.Document.Items.Clear();
+
+        var item = new TodoItem();
+        item.Elements.Add(ContentElement.CreateText("AB"));
+        item.Elements.Add(ContentElement.CreateImage(CreateTestBitmap()));
+        item.Elements.Add(ContentElement.CreateText("CD"));
+        editor.Document.Items.Add(item);
+
+        // Delete "A" from "AB" — image and "CD" should survive
+        editor.Caret = new CursorPosition(0, 1);
+        editor.SelectionAnchor = new CursorPosition(0, 0);
+        editor.DeleteSelection();
+
+        var resultItem = editor.Document.Items[0];
+        Assert.That(resultItem.Elements.Count, Is.EqualTo(3));
+        Assert.That(resultItem.Elements[0].Text, Is.EqualTo("B"));
+        Assert.That(resultItem.Elements[1].Type, Is.EqualTo(ContentElementType.Image));
+        Assert.That(resultItem.Elements[2].Text, Is.EqualTo("CD"));
+    }
+
+    [AvaloniaTest]
+    public void DeleteRange_SpanningTextAndImage()
+    {
+        var editor = new TodoListEditor();
+        editor.Document.Items.Clear();
+
+        var item = new TodoItem();
+        item.Elements.Add(ContentElement.CreateText("AB"));
+        item.Elements.Add(ContentElement.CreateImage(CreateTestBitmap()));
+        item.Elements.Add(ContentElement.CreateText("CD"));
+        editor.Document.Items.Add(item);
+
+        // Delete "B" + image (offsets 1..3)
+        editor.Caret = new CursorPosition(0, 3);
+        editor.SelectionAnchor = new CursorPosition(0, 1);
+        editor.DeleteSelection();
+
+        var resultItem = editor.Document.Items[0];
+        Assert.That(resultItem.PlainText, Is.EqualTo("ACD"));
+    }
+
+    // ---- Ctrl+Arrow word navigation tests ----
+
+    [AvaloniaTest]
+    public void CtrlRight_MovesToNextWordBoundary()
+    {
+        var editor = new TodoListEditor();
+        editor.Document.Items.Clear();
+        editor.Document.Items.Add(new TodoItem("Hello World"));
+        editor.Caret = new CursorPosition(0, 0);
+        editor.SelectionAnchor = editor.Caret;
+
+        editor.MoveCaretByWord(1, false);
+
+        Assert.That(editor.Caret.Offset, Is.EqualTo(6));
+    }
+
+    [AvaloniaTest]
+    public void CtrlLeft_MovesToPreviousWordBoundary()
+    {
+        var editor = new TodoListEditor();
+        editor.Document.Items.Clear();
+        editor.Document.Items.Add(new TodoItem("Hello World"));
+        editor.Caret = new CursorPosition(0, 11);
+        editor.SelectionAnchor = editor.Caret;
+
+        editor.MoveCaretByWord(-1, false);
+
+        Assert.That(editor.Caret.Offset, Is.EqualTo(6));
+    }
+
+    [AvaloniaTest]
+    public void CtrlShiftRight_ExtendsSelection()
+    {
+        var editor = new TodoListEditor();
+        editor.Document.Items.Clear();
+        editor.Document.Items.Add(new TodoItem("Hello World"));
+        editor.Caret = new CursorPosition(0, 0);
+        editor.SelectionAnchor = editor.Caret;
+
+        editor.MoveCaretByWord(1, true);
+
+        Assert.That(editor.Caret.Offset, Is.EqualTo(6));
+        Assert.That(editor.SelectionAnchor.Offset, Is.EqualTo(0));
+        Assert.That(editor.HasSelection, Is.True);
+    }
+
     private static Bitmap CreateTestBitmap()
     {
         return new WriteableBitmap(
