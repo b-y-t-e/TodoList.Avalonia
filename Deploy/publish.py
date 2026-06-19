@@ -61,7 +61,7 @@ def bump_version(csproj: Path) -> tuple:
     updated = content.replace(f"<Version>{old_ver}</Version>",
                                f"<Version>{new_ver}</Version>")
     csproj.write_text(updated, encoding="utf-8")
-    print(f"Version bumped: {old_ver} → {new_ver}")
+    print(f"Version bumped: {old_ver} -> {new_ver}")
     return old_ver, new_ver
 
 
