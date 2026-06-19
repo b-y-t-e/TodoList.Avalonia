@@ -28,7 +28,7 @@ public class MainWindow : Window
 
         _statusBar = new TextBlock
         {
-            Text = "Gotowe. Kliknij checkbox aby zaznaczyć. Wpisuj tekst. Ctrl+V wkleja tekst/obrazki. Shift+strzałki zaznaczają.",
+            Text = "Ready. Click checkbox to check. Type text. Ctrl+V pastes text/images. Shift+arrows to select.",
             Margin = new Thickness(8, 4),
             FontSize = 12,
             Foreground = Brushes.Gray
@@ -36,7 +36,7 @@ public class MainWindow : Window
 
         var addButton = new Button
         {
-            Content = "+ Dodaj punkt",
+            Content = "+ Add item",
             Margin = new Thickness(4),
             HorizontalAlignment = HorizontalAlignment.Left
         };
@@ -51,7 +51,7 @@ public class MainWindow : Window
 
         var checkAllButton = new Button
         {
-            Content = "✓ Zaznacz wszystkie",
+            Content = "✓ Check all",
             Margin = new Thickness(4)
         };
         checkAllButton.Click += (_, _) =>
@@ -63,7 +63,7 @@ public class MainWindow : Window
 
         var uncheckAllButton = new Button
         {
-            Content = "✗ Odznacz wszystkie",
+            Content = "✗ Uncheck all",
             Margin = new Thickness(4)
         };
         uncheckAllButton.Click += (_, _) =>
@@ -129,11 +129,11 @@ public class MainWindow : Window
         Content = mainPanel;
 
         _editor.Document.Items.Clear();
-        _editor.Document.Items.Add(new TodoItem("Kupić mleko"));
-        _editor.Document.Items.Add(new TodoItem("Wyprowadzić psa", true));
+        _editor.Document.Items.Add(new TodoItem("Buy milk"));
+        _editor.Document.Items.Add(new TodoItem("Walk the dog", true));
         _editor.Document.Items.Add(new TodoItem("Code review PR #42"));
-        _editor.Document.Items.Add(new TodoItem("Wkleić tu tekst wieloliniowy (Ctrl+V)"));
-        _editor.Document.Items.Add(new TodoItem("Wkleić tu obrazek (Ctrl+V)"));
+        _editor.Document.Items.Add(new TodoItem("Paste multiline text here (Ctrl+V)"));
+        _editor.Document.Items.Add(new TodoItem("Paste an image here (Ctrl+V)"));
         _editor.InvalidateVisual();
     }
 }
