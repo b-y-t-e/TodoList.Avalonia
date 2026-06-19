@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using global::Avalonia.Headless.NUnit;
 using global::Avalonia.Media;
 using global::Avalonia.Media.Imaging;
@@ -776,7 +778,7 @@ public class TodoListEditorTests
     public void SetItemsPopulatesDocument()
     {
         var editor = new TodoListEditor();
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("Buy milk"),
             new("Walk dog", true),
@@ -794,7 +796,7 @@ public class TodoListEditorTests
     public void EditSyncsBackToItems()
     {
         var editor = new TodoListEditor();
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("Hello"),
         };
@@ -811,7 +813,7 @@ public class TodoListEditorTests
     public void ItemsChangedEventFires()
     {
         var editor = new TodoListEditor();
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("Test"),
         };
@@ -831,7 +833,7 @@ public class TodoListEditorTests
     public void ViewModelTextChangeUpdatesDocument()
     {
         var editor = new TodoListEditor();
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("Original"),
         };
@@ -846,7 +848,7 @@ public class TodoListEditorTests
     public void ViewModelCheckedChangeUpdatesDocument()
     {
         var editor = new TodoListEditor();
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("Task", false),
         };
@@ -861,7 +863,7 @@ public class TodoListEditorTests
     public void CollectionAddSyncsToDocument()
     {
         var editor = new TodoListEditor();
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("First"),
         };
@@ -877,7 +879,7 @@ public class TodoListEditorTests
     public void CollectionRemoveSyncsToDocument()
     {
         var editor = new TodoListEditor();
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("First"),
             new("Second"),
@@ -897,7 +899,7 @@ public class TodoListEditorTests
         var bmp = CreateTestBitmap();
         editor.ImageStore["photo1"] = bmp;
 
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("Before ![alt](photo1) after"),
         };
@@ -920,7 +922,7 @@ public class TodoListEditorTests
         var bmp = CreateTestBitmap();
         editor.ImageStore["pic1"] = bmp;
 
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("Check ![receipt](pic1) done"),
         };
@@ -939,7 +941,7 @@ public class TodoListEditorTests
     public void UnknownImageKeyKeptAsText()
     {
         var editor = new TodoListEditor();
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("Text ![alt](missing_key) more"),
         };
@@ -954,7 +956,7 @@ public class TodoListEditorTests
     public void SplitItemSyncsNewItemToCollection()
     {
         var editor = new TodoListEditor();
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("HelloWorld"),
         };
@@ -973,7 +975,7 @@ public class TodoListEditorTests
     public void ToggleItemSyncsToItems()
     {
         var editor = new TodoListEditor();
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("Task", false),
         };
@@ -998,7 +1000,7 @@ public class TodoListEditorTests
     public void PastedImageGetsAutoRegisteredInImageStore()
     {
         var editor = new TodoListEditor();
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("Before"),
         };
@@ -1023,7 +1025,7 @@ public class TodoListEditorTests
         editor.ImageStore["a"] = bmp1;
         editor.ImageStore["b"] = bmp2;
 
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("![x](a) mid ![y](b)"),
         };
@@ -1040,7 +1042,7 @@ public class TodoListEditorTests
     public void DeleteSelectionAcrossItemsMergesAndSyncs()
     {
         var editor = new TodoListEditor();
-        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        var items = new ObservableCollection<TodoItemData>
         {
             new("First"),
             new("Second"),
@@ -1146,6 +1148,455 @@ public class TodoListEditorTests
         Assert.That(editor.Caret.Offset, Is.EqualTo(6));
         Assert.That(editor.SelectionAnchor.Offset, Is.EqualTo(0));
         Assert.That(editor.HasSelection, Is.True);
+    }
+
+    // ---- Images collection tests ----
+
+    [AvaloniaTest]
+    public void ImagesCollectionResolvesImageInText()
+    {
+        var editor = new TodoListEditor();
+        var bmp = CreateTestBitmap();
+        var images = new ObservableCollection<TodoImageEntry>
+        {
+            new("photo1", bmp)
+        };
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new("Before ![alt](photo1) after"),
+        };
+        editor.Images = images;
+        editor.Items = items;
+
+        Assert.That(editor.Document.Items[0].Elements.Count, Is.EqualTo(3));
+        Assert.That(editor.Document.Items[0].Elements[1].Type, Is.EqualTo(ContentElementType.Image));
+        Assert.That(editor.Document.Items[0].Elements[1].ImageKey, Is.EqualTo("photo1"));
+    }
+
+    [AvaloniaTest]
+    public void ImagesCollectionOrderIndependent_ItemsFirst()
+    {
+        var editor = new TodoListEditor();
+        var bmp = CreateTestBitmap();
+
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new("Text ![alt](pic1) end"),
+        };
+        editor.Items = items;
+
+        Assert.That(editor.Document.Items[0].Elements.All(
+            e => e.Type == ContentElementType.Text), Is.True);
+
+        var images = new ObservableCollection<TodoImageEntry>
+        {
+            new("pic1", bmp)
+        };
+        editor.Images = images;
+
+        Assert.That(editor.Document.Items[0].Elements[1].Type, Is.EqualTo(ContentElementType.Image));
+        Assert.That(editor.Document.Items[0].Elements[1].ImageKey, Is.EqualTo("pic1"));
+    }
+
+    [AvaloniaTest]
+    public void DeferredImageLoad_NullBitmapThenSet()
+    {
+        var editor = new TodoListEditor();
+        var images = new ObservableCollection<TodoImageEntry>();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new("Before ![alt](lazy) after"),
+        };
+        editor.Images = images;
+        editor.Items = items;
+
+        var entry = new TodoImageEntry("lazy");
+        images.Add(entry);
+
+        Assert.That(editor.Document.Items[0].Elements.All(
+            e => e.Type == ContentElementType.Text), Is.True);
+
+        entry.Bitmap = CreateTestBitmap();
+
+        Assert.That(editor.Document.Items[0].Elements[1].Type, Is.EqualTo(ContentElementType.Image));
+        Assert.That(editor.Document.Items[0].Elements[1].ImageKey, Is.EqualTo("lazy"));
+    }
+
+    [AvaloniaTest]
+    public void MissingImageKeyStaysAsText_NoImagesCollection()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new("Text ![alt](missing) more"),
+        };
+        editor.Items = items;
+
+        Assert.That(editor.Document.Items[0].Elements.All(
+            e => e.Type == ContentElementType.Text), Is.True);
+        Assert.That(editor.Document.Items[0].PlainText, Is.EqualTo("Text ![alt](missing) more"));
+    }
+
+    [AvaloniaTest]
+    public void PastedImageAutoAddsToImagesCollection()
+    {
+        var editor = new TodoListEditor();
+        var images = new ObservableCollection<TodoImageEntry>();
+        editor.Images = images;
+
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new("Before"),
+        };
+        editor.Items = items;
+
+        editor.Caret = new CursorPosition(0, 6);
+        editor.SelectionAnchor = new CursorPosition(0, 6);
+        editor.InsertImageAtCaret(CreateTestBitmap());
+
+        Assert.That(images.Count, Is.EqualTo(1));
+        Assert.That(items[0].Text, Does.Contain($"![image]({images[0].Key})"));
+    }
+
+    // ---- TodoMarkdown tests ----
+
+    [Test]
+    public void ParseMarkdown_CheckedAndUnchecked()
+    {
+        var items = TodoMarkdown.ParseMarkdown("- [ ] Buy milk\n- [x] Walk the dog");
+
+        Assert.That(items.Count, Is.EqualTo(2));
+        Assert.That(items[0].Text, Is.EqualTo("Buy milk"));
+        Assert.That(items[0].IsChecked, Is.False);
+        Assert.That(items[1].Text, Is.EqualTo("Walk the dog"));
+        Assert.That(items[1].IsChecked, Is.True);
+    }
+
+    [Test]
+    public void ParseMarkdown_CapitalX()
+    {
+        var items = TodoMarkdown.ParseMarkdown("- [X] Done");
+
+        Assert.That(items[0].IsChecked, Is.True);
+        Assert.That(items[0].Text, Is.EqualTo("Done"));
+    }
+
+    [Test]
+    public void ParseMarkdown_LineWithoutCheckbox()
+    {
+        var items = TodoMarkdown.ParseMarkdown("Plain line\n- [ ] With checkbox");
+
+        Assert.That(items.Count, Is.EqualTo(2));
+        Assert.That(items[0].Text, Is.EqualTo("Plain line"));
+        Assert.That(items[0].IsChecked, Is.False);
+        Assert.That(items[1].Text, Is.EqualTo("With checkbox"));
+    }
+
+    [Test]
+    public void ParseMarkdown_EmptyString()
+    {
+        var items = TodoMarkdown.ParseMarkdown("");
+        Assert.That(items.Count, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void ParseMarkdown_NullString()
+    {
+        var items = TodoMarkdown.ParseMarkdown(null!);
+        Assert.That(items.Count, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void ToMarkdown_RoundTrip()
+    {
+        var original = "- [ ] Buy milk\n- [x] Walk the dog\n- [ ] Code review";
+        var items = TodoMarkdown.ParseMarkdown(original);
+        var serialized = TodoMarkdown.ToMarkdown(items);
+
+        Assert.That(serialized, Is.EqualTo(original));
+    }
+
+    [Test]
+    public void ToMarkdown_WithImageSyntax()
+    {
+        var items = new List<TodoItemData>
+        {
+            new("Text with ![star](star) image", false)
+        };
+        var md = TodoMarkdown.ToMarkdown(items);
+
+        Assert.That(md, Is.EqualTo("- [ ] Text with ![star](star) image"));
+    }
+
+    // ---- IsDirty tests ----
+
+    [AvaloniaTest]
+    public void IsDirty_CleanAfterLoad()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new("Item 1"),
+            new("Item 2", true),
+        };
+        editor.Items = items;
+
+        Assert.That(editor.IsDirty, Is.False);
+    }
+
+    [AvaloniaTest]
+    public void IsDirty_DirtyAfterEdit()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new("Item 1"),
+        };
+        editor.Items = items;
+
+        editor.Caret = new CursorPosition(0, 6);
+        editor.SelectionAnchor = editor.Caret;
+        editor.InsertTextAtCaret("X");
+
+        Assert.That(editor.IsDirty, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void IsDirty_CleanAfterMarkClean()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new("Item 1"),
+        };
+        editor.Items = items;
+
+        editor.InsertTextAtCaret("X");
+        Assert.That(editor.IsDirty, Is.True);
+
+        editor.MarkClean();
+        Assert.That(editor.IsDirty, Is.False);
+    }
+
+    [AvaloniaTest]
+    public void IsDirty_DirtyAfterUndo()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new("Original"),
+        };
+        editor.Items = items;
+
+        editor.Caret = new CursorPosition(0, 8);
+        editor.SelectionAnchor = editor.Caret;
+        editor.SaveUndoState();
+        editor.InsertTextAtCaret("X");
+        editor.MarkClean();
+
+        Assert.That(editor.IsDirty, Is.False);
+
+        editor.Undo();
+        Assert.That(editor.IsDirty, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void IsDirty_DirtyChangedEventFires()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new("Item 1"),
+        };
+        editor.Items = items;
+
+        int fireCount = 0;
+        editor.DirtyChanged += (_, _) => fireCount++;
+
+        editor.InsertTextAtCaret("X");
+        Assert.That(fireCount, Is.EqualTo(1));
+
+        editor.MarkClean();
+        Assert.That(fireCount, Is.EqualTo(2));
+    }
+
+    [AvaloniaTest]
+    public void MvvmTextChangeSetsIsDirty()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("Hello")
+        };
+        editor.Items = items;
+
+        Assert.That(editor.IsDirty, Is.False);
+
+        items[0].Text = "Changed";
+
+        Assert.That(editor.IsDirty, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void MvvmIsCheckedChangeSetsIsDirty()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("Task", false)
+        };
+        editor.Items = items;
+
+        Assert.That(editor.IsDirty, Is.False);
+
+        items[0].IsChecked = true;
+
+        Assert.That(editor.IsDirty, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void MvvmAddItemSetsIsDirty()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("First")
+        };
+        editor.Items = items;
+        editor.MarkClean();
+
+        Assert.That(editor.IsDirty, Is.False);
+
+        items.Add(new TodoItemData("Second"));
+
+        Assert.That(editor.IsDirty, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void MvvmRemoveItemSetsIsDirty()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("First"),
+            new TodoItemData("Second")
+        };
+        editor.Items = items;
+        editor.MarkClean();
+
+        Assert.That(editor.IsDirty, Is.False);
+
+        items.RemoveAt(1);
+
+        Assert.That(editor.IsDirty, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void DirtyChangedFiresOnMvvmChange()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("Hello")
+        };
+        editor.Items = items;
+
+        int firedCount = 0;
+        editor.DirtyChanged += (_, _) => firedCount++;
+
+        items[0].Text = "Changed";
+
+        Assert.That(firedCount, Is.EqualTo(1));
+        Assert.That(editor.IsDirty, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void DefaultFontNameSyncsToDefaultFont()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFontName = "Consolas";
+        Assert.That(editor.DefaultFont.Name, Is.EqualTo("Consolas"));
+    }
+
+    [AvaloniaTest]
+    public void DefaultFontSyncsToDefaultFontName()
+    {
+        var editor = new TodoListEditor();
+        editor.DefaultFont = new FontFamily("Consolas");
+        Assert.That(editor.DefaultFontName, Is.EqualTo("Consolas"));
+    }
+
+    [AvaloniaTest]
+    public void ImagePastedKeyOverrideUpdatesCorrectly()
+    {
+        var editor = new TodoListEditor();
+        var images = new ObservableCollection<TodoImageEntry>();
+        editor.Images = images;
+        editor.Items = new ObservableCollection<TodoItemData> { new TodoItemData("test") };
+
+        editor.ImagePasted += (_, args) => { args.NewKey = "custom_key"; };
+        editor.InsertImageAtCaret(CreateTestBitmap());
+
+        Assert.That(images.Count, Is.EqualTo(1));
+        Assert.That(images[0].Key, Is.EqualTo("custom_key"));
+    }
+
+    [Test]
+    public void ToMarkdownEmptyListReturnsEmpty()
+    {
+        var result = TodoMarkdown.ToMarkdown(new List<TodoItemData>());
+        Assert.That(result, Is.EqualTo(string.Empty));
+    }
+
+    [Test]
+    public void ToMarkdownNullReturnsEmpty()
+    {
+        var result = TodoMarkdown.ToMarkdown(null);
+        Assert.That(result, Is.EqualTo(string.Empty));
+    }
+
+    [Test]
+    public void TodoImageEntryNullKeyThrows()
+    {
+        Assert.Throws<System.ArgumentNullException>(() => new TodoImageEntry(null!));
+    }
+
+    [Test]
+    public void ParseMarkdownSkipsEmptyLines()
+    {
+        var items = TodoMarkdown.ParseMarkdown("- [ ] First\n\n\n- [x] Second\n");
+        Assert.That(items.Count, Is.EqualTo(2));
+        Assert.That(items[0].Text, Is.EqualTo("First"));
+        Assert.That(items[1].Text, Is.EqualTo("Second"));
+        Assert.That(items[1].IsChecked, Is.True);
+    }
+
+    [Test]
+    public void ParseMarkdownMalformedCheckboxTreatedAsPlainText()
+    {
+        var items = TodoMarkdown.ParseMarkdown("- [z] text\n- [✓] done\n- [] empty");
+        Assert.That(items.Count, Is.EqualTo(3));
+        Assert.That(items[0].Text, Is.EqualTo("- [z] text"));
+        Assert.That(items[0].IsChecked, Is.False);
+        Assert.That(items[1].Text, Is.EqualTo("- [✓] done"));
+        Assert.That(items[2].Text, Is.EqualTo("- [] empty"));
+    }
+
+    [AvaloniaTest]
+    public void ImagePastedKeyOverrideUpdatesLegacyImageStore()
+    {
+        var editor = new TodoListEditor();
+        var images = new ObservableCollection<TodoImageEntry>();
+        editor.Images = images;
+        editor.Items = new ObservableCollection<TodoItemData> { new TodoItemData("test") };
+
+        editor.ImagePasted += (_, args) => { args.NewKey = "remapped"; };
+        editor.InsertImageAtCaret(CreateTestBitmap());
+
+#pragma warning disable CS0618
+        Assert.That(editor.ImageStore.ContainsKey("remapped"), Is.True);
+        Assert.That(editor.ImageStore.Count, Is.EqualTo(1));
+#pragma warning restore CS0618
     }
 
     private static Bitmap CreateTestBitmap()
