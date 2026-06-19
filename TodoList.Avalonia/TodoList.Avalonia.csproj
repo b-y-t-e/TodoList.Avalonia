@@ -4,7 +4,24 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!-- NuGet package metadata -->
+    <PackageId>TodoList.Avalonia</PackageId>
+    <Version>0.1.0</Version>
+    <Title>TodoList.Avalonia</Title>
+    <Authors>b-y-t-e</Authors>
+    <Description>A custom rich-text todo-list editor control for Avalonia UI. Features checkbox items, inline images, undo/redo, text selection, clipboard support, and MVVM binding.</Description>
+    <PackageTags>TodoList Avalonia UI Editor Control MVVM</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/b-y-t-e/TodoList.Avalonia</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/b-y-t-e/TodoList.Avalonia</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.3" />
