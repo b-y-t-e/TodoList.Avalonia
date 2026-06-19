@@ -1,9 +1,9 @@
-using Avalonia;
-using Avalonia.Headless;
+using global::Avalonia;
+using global::Avalonia.Headless;
 
-[assembly: AvaloniaTestApplication(typeof(TodoListControl.Tests.TestAppBuilder))]
+[assembly: AvaloniaTestApplication(typeof(TodoList.Avalonia.Tests.TestAppBuilder))]
 
-namespace TodoListControl.Tests;
+namespace TodoList.Avalonia.Tests;
 
 public class TestAppBuilder
 {

@@ -1,6 +1,6 @@
-using Avalonia;
+using global::Avalonia;
 
-namespace TodoListControl.Demo;
+namespace TodoList.Avalonia.Demo;
 
 class Program
 {

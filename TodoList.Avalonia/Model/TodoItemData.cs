@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
-namespace TodoListControl.Model;
+namespace TodoList.Avalonia.Model;
 
 public class TodoItemData : INotifyPropertyChanged
 {

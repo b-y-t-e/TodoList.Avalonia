@@ -1,11 +1,11 @@
-using Avalonia.Headless.NUnit;
-using Avalonia.Media;
-using Avalonia.Media.Imaging;
+using global::Avalonia.Headless.NUnit;
+using global::Avalonia.Media;
+using global::Avalonia.Media.Imaging;
 using NUnit.Framework;
-using TodoListControl.Controls;
-using TodoListControl.Model;
+using TodoList.Avalonia.Controls;
+using TodoList.Avalonia.Model;
 
-namespace TodoListControl.Tests;
+namespace TodoList.Avalonia.Tests;
 
 [TestFixture]
 public class TodoListEditorTests
@@ -442,11 +442,11 @@ public class TodoListEditorTests
     {
         var editor = new TodoListEditor();
         editor.DefaultFontSize = 14;
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         editor.InsertTextAtCaret("This is a very long text that should wrap to multiple lines in a narrow editor");
 
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         var item = editor.Document.Items[0];
         Assert.That(item.PlainText.Length, Is.GreaterThan(20));
@@ -459,7 +459,7 @@ public class TodoListEditorTests
         var editor = new TodoListEditor();
         editor.DefaultFontSize = 14;
         editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD EEEE FFFF GGGG HHHH");
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         Assert.That(editor.Document.Items.Count, Is.EqualTo(1));
         Assert.That(editor.Caret.ItemIndex, Is.EqualTo(0));
@@ -472,7 +472,7 @@ public class TodoListEditorTests
         var editor = new TodoListEditor();
         editor.DefaultFontSize = 14;
         editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD EEEE FFFF");
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         editor.SelectionAnchor = new CursorPosition(0, 5);
         editor.Caret = new CursorPosition(0, 25);
@@ -487,7 +487,7 @@ public class TodoListEditorTests
         var editor = new TodoListEditor();
         editor.DefaultFontSize = 14;
         editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD");
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         editor.SelectionAnchor = new CursorPosition(0, 5);
         editor.Caret = new CursorPosition(0, 15);
@@ -502,7 +502,7 @@ public class TodoListEditorTests
         var editor = new TodoListEditor();
         editor.DefaultFontSize = 14;
         editor.InsertTextAtCaret("AAAA CCCC");
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         editor.Caret = new CursorPosition(0, 5);
         editor.SelectionAnchor = editor.Caret;
@@ -517,7 +517,7 @@ public class TodoListEditorTests
         var editor = new TodoListEditor();
         editor.DefaultFontSize = 14;
         editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD");
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         editor.Caret = new CursorPosition(0, 10);
         editor.SelectionAnchor = editor.Caret;
@@ -536,7 +536,7 @@ public class TodoListEditorTests
         editor.InsertTextAtCaret("Before image ");
         editor.InsertImageAtCaret(CreateTestBitmap());
         editor.InsertTextAtCaret(" After image text that is long enough to wrap");
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         Assert.That(editor.Document.Items[0].Elements.Count, Is.GreaterThanOrEqualTo(3));
         Assert.That(editor.GetText(), Does.Contain("Before image"));
@@ -548,7 +548,7 @@ public class TodoListEditorTests
         var editor = new TodoListEditor();
         editor.DefaultFontSize = 14;
         editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD EEEE FFFF");
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         editor.Caret = new CursorPosition(0, 2);
         editor.SelectionAnchor = editor.Caret;
@@ -565,7 +565,7 @@ public class TodoListEditorTests
         var editor = new TodoListEditor();
         editor.DefaultFontSize = 14;
         editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD EEEE FFFF");
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         int endOffset = editor.Document.Items[0].TextLength;
         editor.Caret = new CursorPosition(0, endOffset);
@@ -583,7 +583,7 @@ public class TodoListEditorTests
         var editor = new TodoListEditor();
         editor.DefaultFontSize = 14;
         editor.SetText("AAAA BBBB CCCC DDDD EEEE FFFF\nSecond");
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         int lastOffset = editor.Document.Items[0].TextLength;
         editor.Caret = new CursorPosition(0, lastOffset);
@@ -600,7 +600,7 @@ public class TodoListEditorTests
         var editor = new TodoListEditor();
         editor.DefaultFontSize = 14;
         editor.SetText("First\nAAAA BBBB CCCC DDDD EEEE FFFF");
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         editor.Caret = new CursorPosition(1, 2);
         editor.SelectionAnchor = editor.Caret;
@@ -616,7 +616,7 @@ public class TodoListEditorTests
         var editor = new TodoListEditor();
         editor.DefaultFontSize = 14;
         editor.InsertTextAtCaret("AAAA BBBB CCCC DDDD EEEE FFFF");
-        editor.Measure(new Avalonia.Size(150, 600));
+        editor.Measure(new global::Avalonia.Size(150, 600));
 
         editor.Caret = new CursorPosition(0, 2);
         editor.SelectionAnchor = new CursorPosition(0, 2);
@@ -1056,9 +1056,9 @@ public class TodoListEditorTests
     private static Bitmap CreateTestBitmap()
     {
         return new WriteableBitmap(
-            new Avalonia.PixelSize(10, 10),
-            new Avalonia.Vector(96, 96),
-            Avalonia.Platform.PixelFormat.Bgra8888,
-            Avalonia.Platform.AlphaFormat.Premul);
+            new global::Avalonia.PixelSize(10, 10),
+            new global::Avalonia.Vector(96, 96),
+            global::Avalonia.Platform.PixelFormat.Bgra8888,
+            global::Avalonia.Platform.AlphaFormat.Premul);
     }
 }

@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Text;
-using Avalonia.Media;
-using Avalonia.Media.Imaging;
+using global::Avalonia.Media;
+using global::Avalonia.Media.Imaging;
 
-namespace TodoListControl.Model;
+namespace TodoList.Avalonia.Model;
 
 public enum ContentElementType
 {

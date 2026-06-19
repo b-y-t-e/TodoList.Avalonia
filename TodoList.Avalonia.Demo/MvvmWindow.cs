@@ -1,13 +1,13 @@
-using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Data;
-using Avalonia.Layout;
-using Avalonia.Media;
-using Avalonia.Media.Imaging;
-using Avalonia.Platform;
-using TodoListControl.Controls;
+using global::Avalonia;
+using global::Avalonia.Controls;
+using global::Avalonia.Data;
+using global::Avalonia.Layout;
+using global::Avalonia.Media;
+using global::Avalonia.Media.Imaging;
+using global::Avalonia.Platform;
+using TodoList.Avalonia.Controls;
 
-namespace TodoListControl.Demo;
+namespace TodoList.Avalonia.Demo;
 
 public class MvvmWindow : Window
 {
@@ -61,8 +61,8 @@ public class MvvmWindow : Window
         var scrollViewer = new ScrollViewer
         {
             Content = editor,
-            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
+            HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
         };
 
         var itemCountText = new TextBlock { Margin = new Thickness(8, 4), FontSize = 12 };
@@ -91,7 +91,7 @@ public class MvvmWindow : Window
             FontSize = 12,
             [!ListBox.ItemsSourceProperty] = new Binding("Items")
         };
-        vmItemsList.ItemTemplate = new Avalonia.Controls.Templates.FuncDataTemplate<TodoListControl.Model.TodoItemData>(
+        vmItemsList.ItemTemplate = new global::Avalonia.Controls.Templates.FuncDataTemplate<TodoList.Avalonia.Model.TodoItemData>(
             (item, _) =>
             {
                 var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };

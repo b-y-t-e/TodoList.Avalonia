@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\TodoListControl\TodoListControl.csproj" />
+    <ProjectReference Include="..\TodoList.Avalonia\TodoList.Avalonia.csproj" />
   </ItemGroup>
 
   <ItemGroup>

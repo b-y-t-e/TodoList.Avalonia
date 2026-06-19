@@ -6,16 +6,16 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Input;
-using Avalonia.Layout;
-using Avalonia.Media;
-using Avalonia.Media.Imaging;
-using TodoListControl.Model;
+using global::Avalonia;
+using global::Avalonia.Controls;
+using global::Avalonia.Controls.Primitives;
+using global::Avalonia.Input;
+using global::Avalonia.Layout;
+using global::Avalonia.Media;
+using global::Avalonia.Media.Imaging;
+using TodoList.Avalonia.Model;
 
-namespace TodoListControl.Controls;
+namespace TodoList.Avalonia.Controls;
 
 public class TodoListEditor : Control
 {
@@ -27,6 +27,9 @@ public class TodoListEditor : Control
 
     public static readonly StyledProperty<IList<TodoItemData>?> ItemsProperty =
         AvaloniaProperty.Register<TodoListEditor, IList<TodoItemData>?>(nameof(Items));
+
+    public static readonly StyledProperty<double> InlineImageMaxHeightProperty =
+        AvaloniaProperty.Register<TodoListEditor, double>(nameof(InlineImageMaxHeight), 48.0);
 
     public FontFamily DefaultFont
     {
@@ -46,6 +49,12 @@ public class TodoListEditor : Control
         set => SetValue(ItemsProperty, value);
     }
 
+    public double InlineImageMaxHeight
+    {
+        get => GetValue(InlineImageMaxHeightProperty);
+        set => SetValue(InlineImageMaxHeightProperty, value);
+    }
+
     public Dictionary<string, Bitmap> ImageStore { get; } = new();
 
     public event EventHandler? ItemsChanged;
@@ -63,7 +72,6 @@ public class TodoListEditor : Control
     private const double CheckboxSize = 16;
     private const double CheckboxMarginRight = 8;
     private const double LineSpacing = 6;
-    private const double InlineImageMaxHeight = 48;
     private const double WrapLineSpacing = 2;
 
     private readonly List<double> _itemYPositions = new();
@@ -159,6 +167,10 @@ public class TodoListEditor : Control
         if (change.Property == DefaultFontProperty || change.Property == DefaultFontSizeProperty)
         {
             SyncDocumentDefaults();
+            InvalidateMeasure();
+        }
+        else if (change.Property == InlineImageMaxHeightProperty)
+        {
             InvalidateMeasure();
         }
         else if (change.Property == ItemsProperty)

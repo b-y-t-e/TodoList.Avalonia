@@ -1,4 +1,4 @@
-namespace TodoListControl.Model;
+namespace TodoList.Avalonia.Model;
 
 public struct CursorPosition
 {

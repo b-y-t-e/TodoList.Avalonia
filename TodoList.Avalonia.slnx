@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="TodoList.Avalonia/TodoList.Avalonia.csproj" />
+  <Project Path="TodoList.Avalonia.Tests/TodoList.Avalonia.Tests.csproj" />
+  <Project Path="TodoList.Avalonia.Demo/TodoList.Avalonia.Demo.csproj" />
+</Solution>

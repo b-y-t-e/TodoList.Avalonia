@@ -1,11 +1,11 @@
-using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Layout;
-using Avalonia.Media;
-using TodoListControl.Controls;
-using TodoListControl.Model;
+using global::Avalonia;
+using global::Avalonia.Controls;
+using global::Avalonia.Layout;
+using global::Avalonia.Media;
+using TodoList.Avalonia.Controls;
+using TodoList.Avalonia.Model;
 
-namespace TodoListControl.Demo;
+namespace TodoList.Avalonia.Demo;
 
 public class MainWindow : Window
 {
@@ -115,8 +115,8 @@ public class MainWindow : Window
         var scrollViewer = new ScrollViewer
         {
             Content = _editor,
-            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
+            HorizontalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = global::Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
         };
 
         var mainPanel = new DockPanel();

@@ -11,7 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="TodoListControl.Tests" />
+    <InternalsVisibleTo Include="TodoList.Avalonia.Tests" />
   </ItemGroup>
 
 </Project>

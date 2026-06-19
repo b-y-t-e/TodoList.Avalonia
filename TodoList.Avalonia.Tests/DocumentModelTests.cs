@@ -1,8 +1,8 @@
-using Avalonia.Headless.NUnit;
+using global::Avalonia.Headless.NUnit;
 using NUnit.Framework;
-using TodoListControl.Model;
+using TodoList.Avalonia.Model;
 
-namespace TodoListControl.Tests;
+namespace TodoList.Avalonia.Tests;
 
 [TestFixture]
 public class DocumentModelTests
@@ -197,12 +197,12 @@ public class DocumentModelTests
         Assert.That(localOff, Is.EqualTo(0));
     }
 
-    private static Avalonia.Media.Imaging.Bitmap CreateTestBitmap()
+    private static global::Avalonia.Media.Imaging.Bitmap CreateTestBitmap()
     {
-        return new Avalonia.Media.Imaging.WriteableBitmap(
-            new Avalonia.PixelSize(10, 10),
-            new Avalonia.Vector(96, 96),
-            Avalonia.Platform.PixelFormat.Bgra8888,
-            Avalonia.Platform.AlphaFormat.Premul);
+        return new global::Avalonia.Media.Imaging.WriteableBitmap(
+            new global::Avalonia.PixelSize(10, 10),
+            new global::Avalonia.Vector(96, 96),
+            global::Avalonia.Platform.PixelFormat.Bgra8888,
+            global::Avalonia.Platform.AlphaFormat.Premul);
     }
 }

@@ -1,10 +1,10 @@
 using System.Linq;
-using Avalonia;
-using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Markup.Xaml;
-using Avalonia.Themes.Fluent;
+using global::Avalonia;
+using global::Avalonia.Controls.ApplicationLifetimes;
+using global::Avalonia.Markup.Xaml;
+using global::Avalonia.Themes.Fluent;
 
-namespace TodoListControl.Demo;
+namespace TodoList.Avalonia.Demo;
 
 public class App : Application
 {

@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="TodoListControl/TodoListControl.csproj" />
-  <Project Path="TodoListControl.Tests/TodoListControl.Tests.csproj" />
-  <Project Path="TodoListControl.Demo/TodoListControl.Demo.csproj" />
-</Solution>

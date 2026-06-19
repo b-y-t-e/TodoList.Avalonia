@@ -4,9 +4,9 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
-using TodoListControl.Model;
+using TodoList.Avalonia.Model;
 
-namespace TodoListControl.Demo;
+namespace TodoList.Avalonia.Demo;
 
 public class TodoViewModel : INotifyPropertyChanged
 {
