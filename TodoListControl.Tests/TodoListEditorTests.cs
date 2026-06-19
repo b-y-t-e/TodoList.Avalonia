@@ -628,6 +628,431 @@ public class TodoListEditorTests
         Assert.That(editor.Caret.Offset, Is.GreaterThan(2));
     }
 
+    // ---- Undo / Redo tests ----
+
+    [AvaloniaTest]
+    public void UndoRevertsTextInsert()
+    {
+        var editor = new TodoListEditor();
+        editor.SaveUndoState();
+        editor.InsertTextAtCaret("Hello");
+
+        Assert.That(editor.GetText(), Is.EqualTo("Hello"));
+
+        editor.Undo();
+
+        Assert.That(editor.GetText(), Is.EqualTo(""));
+    }
+
+    [AvaloniaTest]
+    public void RedoRestoresUndoneChange()
+    {
+        var editor = new TodoListEditor();
+        editor.SaveUndoState();
+        editor.InsertTextAtCaret("Hello");
+        editor.Undo();
+
+        Assert.That(editor.GetText(), Is.EqualTo(""));
+
+        editor.Redo();
+
+        Assert.That(editor.GetText(), Is.EqualTo("Hello"));
+    }
+
+    [AvaloniaTest]
+    public void UndoRevertsSplitItem()
+    {
+        var editor = new TodoListEditor();
+        editor.InsertTextAtCaret("AAAA BBBB");
+        editor.Caret = new CursorPosition(0, 5);
+        editor.SelectionAnchor = editor.Caret;
+
+        editor.SaveUndoState();
+        editor.SplitItemAtCaret();
+
+        Assert.That(editor.Document.Items.Count, Is.EqualTo(2));
+
+        editor.Undo();
+
+        Assert.That(editor.Document.Items.Count, Is.EqualTo(1));
+        Assert.That(editor.GetText(), Is.EqualTo("AAAA BBBB"));
+    }
+
+    [AvaloniaTest]
+    public void UndoRevertsDeleteSelection()
+    {
+        var editor = new TodoListEditor();
+        editor.InsertTextAtCaret("Hello World");
+        editor.SelectionAnchor = new CursorPosition(0, 0);
+        editor.Caret = new CursorPosition(0, 5);
+
+        editor.SaveUndoState();
+        editor.DeleteSelection();
+
+        Assert.That(editor.GetText(), Is.EqualTo(" World"));
+
+        editor.Undo();
+
+        Assert.That(editor.GetText(), Is.EqualTo("Hello World"));
+    }
+
+    [AvaloniaTest]
+    public void UndoRevertsCheckboxToggle()
+    {
+        var editor = new TodoListEditor();
+        editor.SetText("Task 1");
+
+        Assert.That(editor.Document.Items[0].IsChecked, Is.False);
+
+        editor.SaveUndoState();
+        editor.Document.Items[0].IsChecked = true;
+
+        editor.Undo();
+
+        Assert.That(editor.Document.Items[0].IsChecked, Is.False);
+    }
+
+    [AvaloniaTest]
+    public void MultipleUndosWorkInOrder()
+    {
+        var editor = new TodoListEditor();
+
+        editor.SaveUndoState();
+        editor.InsertTextAtCaret("A");
+        editor.SaveUndoState();
+        editor.InsertTextAtCaret("B");
+        editor.SaveUndoState();
+        editor.InsertTextAtCaret("C");
+
+        Assert.That(editor.GetText(), Is.EqualTo("ABC"));
+
+        editor.Undo();
+        Assert.That(editor.GetText(), Is.EqualTo("AB"));
+
+        editor.Undo();
+        Assert.That(editor.GetText(), Is.EqualTo("A"));
+
+        editor.Undo();
+        Assert.That(editor.GetText(), Is.EqualTo(""));
+    }
+
+    [AvaloniaTest]
+    public void NewEditAfterUndoClearsRedoStack()
+    {
+        var editor = new TodoListEditor();
+
+        editor.SaveUndoState();
+        editor.InsertTextAtCaret("A");
+        editor.SaveUndoState();
+        editor.InsertTextAtCaret("B");
+
+        editor.Undo();
+        Assert.That(editor.GetText(), Is.EqualTo("A"));
+
+        editor.SaveUndoState();
+        editor.InsertTextAtCaret("C");
+        Assert.That(editor.GetText(), Is.EqualTo("AC"));
+
+        editor.Redo();
+        Assert.That(editor.GetText(), Is.EqualTo("AC"));
+    }
+
+    [AvaloniaTest]
+    public void UndoOnEmptyStackDoesNothing()
+    {
+        var editor = new TodoListEditor();
+        editor.InsertTextAtCaret("Hello");
+
+        editor.Undo();
+
+        Assert.That(editor.GetText(), Is.EqualTo("Hello"));
+    }
+
+    // ---- MVVM API Tests ----
+
+    [AvaloniaTest]
+    public void SetItemsPopulatesDocument()
+    {
+        var editor = new TodoListEditor();
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("Buy milk"),
+            new("Walk dog", true),
+        };
+        editor.Items = items;
+
+        Assert.That(editor.Document.Items.Count, Is.EqualTo(2));
+        Assert.That(editor.Document.Items[0].PlainText, Is.EqualTo("Buy milk"));
+        Assert.That(editor.Document.Items[0].IsChecked, Is.False);
+        Assert.That(editor.Document.Items[1].PlainText, Is.EqualTo("Walk dog"));
+        Assert.That(editor.Document.Items[1].IsChecked, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void EditSyncsBackToItems()
+    {
+        var editor = new TodoListEditor();
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("Hello"),
+        };
+        editor.Items = items;
+
+        editor.Caret = new CursorPosition(0, 5);
+        editor.SelectionAnchor = new CursorPosition(0, 5);
+        editor.InsertTextAtCaret(" World");
+
+        Assert.That(items[0].Text, Is.EqualTo("Hello World"));
+    }
+
+    [AvaloniaTest]
+    public void ItemsChangedEventFires()
+    {
+        var editor = new TodoListEditor();
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("Test"),
+        };
+        editor.Items = items;
+
+        int fireCount = 0;
+        editor.ItemsChanged += (_, _) => fireCount++;
+
+        editor.Caret = new CursorPosition(0, 4);
+        editor.SelectionAnchor = new CursorPosition(0, 4);
+        editor.InsertTextAtCaret("!");
+
+        Assert.That(fireCount, Is.GreaterThan(0));
+    }
+
+    [AvaloniaTest]
+    public void ViewModelTextChangeUpdatesDocument()
+    {
+        var editor = new TodoListEditor();
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("Original"),
+        };
+        editor.Items = items;
+
+        items[0].Text = "Changed";
+
+        Assert.That(editor.Document.Items[0].PlainText, Is.EqualTo("Changed"));
+    }
+
+    [AvaloniaTest]
+    public void ViewModelCheckedChangeUpdatesDocument()
+    {
+        var editor = new TodoListEditor();
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("Task", false),
+        };
+        editor.Items = items;
+
+        items[0].IsChecked = true;
+
+        Assert.That(editor.Document.Items[0].IsChecked, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void CollectionAddSyncsToDocument()
+    {
+        var editor = new TodoListEditor();
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("First"),
+        };
+        editor.Items = items;
+
+        items.Add(new TodoItemData("Second"));
+
+        Assert.That(editor.Document.Items.Count, Is.EqualTo(2));
+        Assert.That(editor.Document.Items[1].PlainText, Is.EqualTo("Second"));
+    }
+
+    [AvaloniaTest]
+    public void CollectionRemoveSyncsToDocument()
+    {
+        var editor = new TodoListEditor();
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("First"),
+            new("Second"),
+        };
+        editor.Items = items;
+
+        items.RemoveAt(0);
+
+        Assert.That(editor.Document.Items.Count, Is.EqualTo(1));
+        Assert.That(editor.Document.Items[0].PlainText, Is.EqualTo("Second"));
+    }
+
+    [AvaloniaTest]
+    public void ImageMarkdownParsedCorrectly()
+    {
+        var editor = new TodoListEditor();
+        var bmp = CreateTestBitmap();
+        editor.ImageStore["photo1"] = bmp;
+
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("Before ![alt](photo1) after"),
+        };
+        editor.Items = items;
+
+        Assert.That(editor.Document.Items[0].Elements.Count, Is.EqualTo(3));
+        Assert.That(editor.Document.Items[0].Elements[0].Type, Is.EqualTo(ContentElementType.Text));
+        Assert.That(editor.Document.Items[0].Elements[0].Text, Is.EqualTo("Before "));
+        Assert.That(editor.Document.Items[0].Elements[1].Type, Is.EqualTo(ContentElementType.Image));
+        Assert.That(editor.Document.Items[0].Elements[1].ImageKey, Is.EqualTo("photo1"));
+        Assert.That(editor.Document.Items[0].Elements[1].ImageAltText, Is.EqualTo("alt"));
+        Assert.That(editor.Document.Items[0].Elements[2].Type, Is.EqualTo(ContentElementType.Text));
+        Assert.That(editor.Document.Items[0].Elements[2].Text, Is.EqualTo(" after"));
+    }
+
+    [AvaloniaTest]
+    public void ImageSerializedBackToMarkdown()
+    {
+        var editor = new TodoListEditor();
+        var bmp = CreateTestBitmap();
+        editor.ImageStore["pic1"] = bmp;
+
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("Check ![receipt](pic1) done"),
+        };
+        editor.Items = items;
+
+        Assert.That(items[0].Text, Is.EqualTo("Check ![receipt](pic1) done"));
+
+        editor.Caret = new CursorPosition(0, 0);
+        editor.SelectionAnchor = new CursorPosition(0, 0);
+        editor.InsertTextAtCaret("X");
+
+        Assert.That(items[0].Text, Is.EqualTo("XCheck ![receipt](pic1) done"));
+    }
+
+    [AvaloniaTest]
+    public void UnknownImageKeyKeptAsText()
+    {
+        var editor = new TodoListEditor();
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("Text ![alt](missing_key) more"),
+        };
+        editor.Items = items;
+
+        Assert.That(editor.Document.Items[0].Elements.All(
+            e => e.Type == ContentElementType.Text), Is.True);
+        Assert.That(editor.Document.Items[0].PlainText, Is.EqualTo("Text ![alt](missing_key) more"));
+    }
+
+    [AvaloniaTest]
+    public void SplitItemSyncsNewItemToCollection()
+    {
+        var editor = new TodoListEditor();
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("HelloWorld"),
+        };
+        editor.Items = items;
+
+        editor.Caret = new CursorPosition(0, 5);
+        editor.SelectionAnchor = new CursorPosition(0, 5);
+        editor.SplitItemAtCaret();
+
+        Assert.That(items.Count, Is.EqualTo(2));
+        Assert.That(items[0].Text, Is.EqualTo("Hello"));
+        Assert.That(items[1].Text, Is.EqualTo("World"));
+    }
+
+    [AvaloniaTest]
+    public void ToggleItemSyncsToItems()
+    {
+        var editor = new TodoListEditor();
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("Task", false),
+        };
+        editor.Items = items;
+
+        editor.ToggleItem(0);
+
+        Assert.That(items[0].IsChecked, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void NullItemsWorksLikeBeforeMvvm()
+    {
+        var editor = new TodoListEditor();
+        Assert.That(editor.Items, Is.Null);
+
+        editor.InsertTextAtCaret("No MVVM");
+        Assert.That(editor.GetText(), Is.EqualTo("No MVVM"));
+    }
+
+    [AvaloniaTest]
+    public void PastedImageGetsAutoRegisteredInImageStore()
+    {
+        var editor = new TodoListEditor();
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("Before"),
+        };
+        editor.Items = items;
+
+        var bmp = CreateTestBitmap();
+        editor.Caret = new CursorPosition(0, 6);
+        editor.SelectionAnchor = new CursorPosition(0, 6);
+        editor.InsertImageAtCaret(bmp);
+
+        Assert.That(items[0].Text, Does.Contain("!["));
+        Assert.That(items[0].Text, Does.Contain("]("));
+        Assert.That(editor.ImageStore.Count, Is.EqualTo(1));
+    }
+
+    [AvaloniaTest]
+    public void MultipleImagesInSingleItem()
+    {
+        var editor = new TodoListEditor();
+        var bmp1 = CreateTestBitmap();
+        var bmp2 = CreateTestBitmap();
+        editor.ImageStore["a"] = bmp1;
+        editor.ImageStore["b"] = bmp2;
+
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("![x](a) mid ![y](b)"),
+        };
+        editor.Items = items;
+
+        Assert.That(editor.Document.Items[0].Elements.Count, Is.EqualTo(3));
+        Assert.That(editor.Document.Items[0].Elements[0].Type, Is.EqualTo(ContentElementType.Image));
+        Assert.That(editor.Document.Items[0].Elements[1].Type, Is.EqualTo(ContentElementType.Text));
+        Assert.That(editor.Document.Items[0].Elements[1].Text, Is.EqualTo(" mid "));
+        Assert.That(editor.Document.Items[0].Elements[2].Type, Is.EqualTo(ContentElementType.Image));
+    }
+
+    [AvaloniaTest]
+    public void DeleteSelectionAcrossItemsMergesAndSyncs()
+    {
+        var editor = new TodoListEditor();
+        var items = new System.Collections.ObjectModel.ObservableCollection<TodoItemData>
+        {
+            new("First"),
+            new("Second"),
+        };
+        editor.Items = items;
+
+        editor.Caret = new CursorPosition(0, 5);
+        editor.SelectionAnchor = new CursorPosition(1, 0);
+        editor.DeleteSelection();
+
+        Assert.That(items.Count, Is.EqualTo(1));
+        Assert.That(items[0].Text, Is.EqualTo("FirstSecond"));
+    }
+
     private static Bitmap CreateTestBitmap()
     {
         return new WriteableBitmap(
