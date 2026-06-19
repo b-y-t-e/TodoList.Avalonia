@@ -13,7 +13,9 @@ A custom rich-text todo-list editor control for [Avalonia UI](https://avaloniaui
 - Full undo/redo
 - Clipboard integration — paste text and images
 - Fully themeable — all colors and layout constants exposed as Avalonia `StyledProperty`
-- MVVM-ready — bind to `Items` property with `ObservableCollection<TodoItemData>`
+- **MVVM-first** — bind `Items` and `Images` collections, zero imperative code needed
+- Dirty tracking — `IsDirty` property with `DirtyChanged` event and `MarkClean()`
+- Markdown helpers — `TodoMarkdown.ParseMarkdown()` / `ToMarkdown()` for `- [x] text` format
 - Cross-platform via Avalonia (Windows, macOS, Linux)
 
 ## Installation
@@ -22,38 +24,48 @@ A custom rich-text todo-list editor control for [Avalonia UI](https://avaloniaui
 dotnet add package TodoList.Avalonia
 ```
 
-## Usage
+## Usage (MVVM)
 
-```csharp
-var editor = new TodoListEditor
-{
-    DefaultFont = new FontFamily("Segoe UI"),
-    DefaultFontSize = 15,
-    ColorTheme = EditorTheme.Dark // Light (default), Dark, or None for manual control
-};
-
-// Add items directly
-editor.Document.Items.Add(new TodoItem("Buy milk"));
-editor.Document.Items.Add(new TodoItem("Walk the dog", isChecked: true));
-
-// Or bind via MVVM
-editor[!TodoListEditor.ItemsProperty] = new Binding("Items");
+```xml
+<todo:TodoListEditor Items="{Binding Items}" Images="{Binding Images}" />
 ```
 
-### Inline Images
+```csharp
+// ViewModel
+public ObservableCollection<TodoItemData> Items { get; } = new();
+public ObservableCollection<TodoImageEntry> Images { get; } = new();
+```
 
-Register images in the `ImageStore` dictionary, then reference them in item text:
+### Markdown serialization
 
 ```csharp
-editor.ImageStore["star"] = myBitmap;
-// Item text: "Rating: ![star](star) excellent"
+// Load
+foreach (var item in TodoMarkdown.ParseMarkdown(markdown))
+    Items.Add(item);
+
+// Save
+var markdown = TodoMarkdown.ToMarkdown(Items);
 ```
+
+### Deferred image loading
+
+```csharp
+var entry = new TodoImageEntry("photo");  // null bitmap
+Images.Add(entry);
+// ...later, when loaded:
+entry.Bitmap = await LoadBitmapAsync(url);  // triggers re-render
+```
+
+### Image references in text
+
+Item text can contain markdown-compatible image references: `![alt](key)`. Images resolve from the bound `Images` collection by key.
 
 ## Building from Source
 
 ```bash
 dotnet build TodoList.Avalonia.slnx
 dotnet run --project TodoList.Avalonia.Demo
+dotnet run --project TodoList.Avalonia.Demo -- --mvvm
 dotnet test TodoList.Avalonia.Tests
 ```
 
@@ -66,7 +78,14 @@ TodoList.Avalonia/           Core library
   Model/
     DocumentModel.cs       TodoDocument, TodoItem, ContentElement
     TodoItemData.cs        MVVM data model with INotifyPropertyChanged
+    TodoImageEntry.cs      Observable image entry (Key + Bitmap)
+    TodoMarkdown.cs        Markdown parse/serialize helpers
+    TodoItemsChangedEventArgs.cs  ChangeKind enum + event args
+    ImagePastedEventArgs.cs       Image paste event args
 TodoList.Avalonia.Demo/      Demo application
+  MvvmWindow.axaml/.cs    XAML MVVM demo
+  MainWindow.cs            Imperative/legacy demo
+  TodoViewModel.cs         Sample ViewModel
 TodoList.Avalonia.Tests/     NUnit tests (headless Avalonia)
 ```
 
