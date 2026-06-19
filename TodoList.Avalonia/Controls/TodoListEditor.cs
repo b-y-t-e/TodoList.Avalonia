@@ -86,6 +86,15 @@ public class TodoListEditor : Control
     public static readonly StyledProperty<double> WrapLineSpacingProperty =
         AvaloniaProperty.Register<TodoListEditor, double>(nameof(WrapLineSpacing), 2.0);
 
+    public static readonly StyledProperty<IEnumerable<TodoImageEntry>?> ImagesProperty =
+        AvaloniaProperty.Register<TodoListEditor, IEnumerable<TodoImageEntry>?>(nameof(Images));
+
+    public static readonly DirectProperty<TodoListEditor, bool> IsDirtyProperty =
+        AvaloniaProperty.RegisterDirect<TodoListEditor, bool>(nameof(IsDirty), o => o.IsDirty);
+
+    public static readonly StyledProperty<string?> DefaultFontNameProperty =
+        AvaloniaProperty.Register<TodoListEditor, string?>(nameof(DefaultFontName));
+
     public EditorTheme ColorTheme
     {
         get => GetValue(ColorThemeProperty);
@@ -206,9 +215,30 @@ public class TodoListEditor : Control
         set => SetValue(WrapLineSpacingProperty, value);
     }
 
-    public Dictionary<string, Bitmap> ImageStore { get; } = new();
+    public IEnumerable<TodoImageEntry>? Images
+    {
+        get => GetValue(ImagesProperty);
+        set => SetValue(ImagesProperty, value);
+    }
+
+    private bool _isDirty;
+    public bool IsDirty => _isDirty;
+
+    public string? DefaultFontName
+    {
+        get => GetValue(DefaultFontNameProperty);
+        set => SetValue(DefaultFontNameProperty, value);
+    }
+
+    private readonly Dictionary<string, Bitmap> _legacyImageStore = new();
+
+    [Obsolete("Use the Images StyledProperty instead.")]
+    public Dictionary<string, Bitmap> ImageStore => _legacyImageStore;
 
     public event EventHandler? ItemsChanged;
+    public event EventHandler<TodoItemsChangedEventArgs>? ItemsDetailChanged;
+    public event EventHandler<ImagePastedEventArgs>? ImagePasted;
+    public event EventHandler? DirtyChanged;
 
     public TodoDocument Document { get; } = new();
     public CursorPosition Caret { get; set; } = CursorPosition.Start;
@@ -226,6 +256,12 @@ public class TodoListEditor : Control
     private List<List<ContentElement>>? _internalClipboard;
     private string? _internalClipboardText;
     private int _suppressSyncCount;
+    // _imageCache: built from Images collection; _legacyImageStore: backs [Obsolete] ImageStore for backward compat
+    private readonly Dictionary<string, Bitmap> _imageCache = new();
+    private readonly List<TodoImageEntry> _subscribedImageEntries = new();
+    private long _changeGeneration;
+    private long _cleanGeneration;
+    private bool _syncingFontProperties;
 
     private SyncGuard SuppressSync() => new(this);
 
@@ -290,6 +326,8 @@ public class TodoListEditor : Control
     {
         base.OnDetachedFromVisualTree(e);
         UnsubscribeItems(Items);
+        UnsubscribeImages(Images);
+        _imageCache.Clear();
     }
 
     private void UnsubscribeItems(IList<TodoItemData>? items)
@@ -307,7 +345,29 @@ public class TodoListEditor : Control
         if (change.Property == DefaultFontProperty || change.Property == DefaultFontSizeProperty)
         {
             SyncDocumentDefaults();
+            if (change.Property == DefaultFontProperty && !_syncingFontProperties)
+            {
+                _syncingFontProperties = true;
+                try
+                {
+                    var font = (FontFamily?)change.NewValue;
+                    if (font != null)
+                        DefaultFontName = font.Name;
+                }
+                finally { _syncingFontProperties = false; }
+            }
             InvalidateMeasure();
+        }
+        else if (change.Property == DefaultFontNameProperty && !_syncingFontProperties)
+        {
+            _syncingFontProperties = true;
+            try
+            {
+                var name = (string?)change.NewValue;
+                if (name != null)
+                    DefaultFont = new FontFamily(name);
+            }
+            finally { _syncingFontProperties = false; }
         }
         else if (change.Property == InlineImageMaxHeightProperty
             || change.Property == ImageDisplayProperty
@@ -340,6 +400,12 @@ public class TodoListEditor : Control
             OnItemsPropertyChanged(
                 change.OldValue as IList<TodoItemData>,
                 change.NewValue as IList<TodoItemData>);
+        }
+        else if (change.Property == ImagesProperty)
+        {
+            OnImagesPropertyChanged(
+                change.OldValue as IEnumerable<TodoImageEntry>,
+                change.NewValue as IEnumerable<TodoImageEntry>);
         }
     }
 
@@ -920,7 +986,7 @@ public class TodoListEditor : Control
                 SaveUndoState();
                 Document.Items[itemIdx].IsChecked = !Document.Items[itemIdx].IsChecked;
                 InvalidateMeasure();
-                NotifyDocumentChanged();
+                NotifyDocumentChanged(ChangeKind.CheckedChanged);
             }
             return;
         }
@@ -1214,14 +1280,45 @@ public class TodoListEditor : Control
         NotifyDocumentChanged();
     }
 
+    private string RegisterPastedImage(Bitmap bitmap)
+    {
+        string key = $"img_{Guid.NewGuid():N}";
+        _imageCache[key] = bitmap;
+
+        var args = new ImagePastedEventArgs(bitmap, key);
+        ImagePasted?.Invoke(this, args);
+
+        if (args.NewKey != null && args.NewKey != key)
+        {
+            _imageCache.Remove(key);
+            key = args.NewKey;
+            _imageCache[key] = bitmap;
+        }
+
+        if (Images is ICollection<TodoImageEntry> imageCollection)
+            imageCollection.Add(new TodoImageEntry(key, bitmap));
+
+        _legacyImageStore[key] = bitmap;
+        return key;
+    }
+
     public void InsertImageAtCaret(Bitmap bitmap)
     {
         EnsureValidCaret();
+        SaveUndoState();
+        InsertImageAtCaretCore(bitmap);
+    }
+
+    private void InsertImageAtCaretCore(Bitmap bitmap)
+    {
         DeleteSelection();
         var item = Document.Items[Caret.ItemIndex];
         int offset = Math.Min(Caret.Offset, item.TextLength);
 
+        string key = RegisterPastedImage(bitmap);
+
         var imgEl = ContentElement.CreateImage(bitmap);
+        imgEl.ImageKey = key;
 
         if (item.Elements.Count == 0)
         {
@@ -1251,7 +1348,7 @@ public class TodoListEditor : Control
 
         ClearSelectionNoDelete();
         InvalidateMeasure();
-        NotifyDocumentChanged();
+        NotifyDocumentChanged(ChangeKind.ImageChanged);
     }
 
     public void SplitItemAtCaret()
@@ -1310,7 +1407,7 @@ public class TodoListEditor : Control
         Caret = new CursorPosition(Caret.ItemIndex + 1, 0);
         ClearSelectionNoDelete();
         InvalidateMeasure();
-        NotifyDocumentChanged();
+        NotifyDocumentChanged(ChangeKind.StructureChanged);
     }
 
     private void HandleBackspace()
@@ -1649,6 +1746,7 @@ public class TodoListEditor : Control
 
     private void PasteRichContent(List<List<ContentElement>> lines)
     {
+        SaveUndoState();
         using (SuppressSync())
         {
             DeleteSelection();
@@ -1657,7 +1755,7 @@ public class TodoListEditor : Control
                 foreach (var el in lines[i])
                 {
                     if (el.Type == ContentElementType.Image && el.Image != null)
-                        InsertImageAtCaret(el.Image);
+                        InsertImageAtCaretCore(el.Image);
                     else if (el.Type == ContentElementType.Text && el.Text.Length > 0)
                         InsertTextAtCaret(el.Text);
                 }
@@ -1670,6 +1768,7 @@ public class TodoListEditor : Control
 
     public void PasteMultilineText(string text)
     {
+        SaveUndoState();
         using (SuppressSync())
         {
             DeleteSelection();
@@ -1911,7 +2010,7 @@ public class TodoListEditor : Control
             SelectionAnchor = ClampCursorPosition(snapshot.Anchor);
         }
         InvalidateMeasure();
-        NotifyDocumentChanged();
+        NotifyDocumentChanged(ChangeKind.StructureChanged);
     }
 
     internal void SaveUndoState(UndoActionKind action = UndoActionKind.Other)
@@ -1978,10 +2077,14 @@ public class TodoListEditor : Control
 
     // ---- MVVM synchronization ----
 
-    private void NotifyDocumentChanged()
+    private void NotifyDocumentChanged(ChangeKind kind = ChangeKind.TextChanged)
     {
         if (_suppressSyncCount == 0)
-            SyncToItems();
+        {
+            _changeGeneration++;
+            SyncToItems(kind);
+            UpdateDirtyState();
+        }
     }
 
     private void OnItemsPropertyChanged(IList<TodoItemData>? oldItems, IList<TodoItemData>? newItems)
@@ -1994,7 +2097,7 @@ public class TodoListEditor : Control
             foreach (var item in newItems)
                 item.PropertyChanged += OnItemDataPropertyChanged;
 
-        SyncFromItems();
+        ResetDocumentFromItems();
     }
 
     private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -2008,7 +2111,12 @@ public class TodoListEditor : Control
             foreach (TodoItemData item in e.NewItems)
                 item.PropertyChanged += OnItemDataPropertyChanged;
 
-        SyncFromItems();
+        ApplyItemsCollectionChange();
+    }
+
+    private void ApplyItemsCollectionChange()
+    {
+        LoadDocumentFromItems(isFullLoad: false);
     }
 
     private void OnItemDataPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -2038,16 +2146,27 @@ public class TodoListEditor : Control
                 Document.Items[idx] = newItem;
             }
         }
+
+        _changeGeneration++;
+        UpdateDirtyState();
         InvalidateMeasure();
     }
 
-    private void SyncFromItems()
+    private void ResetDocumentFromItems()
+    {
+        LoadDocumentFromItems(isFullLoad: true);
+    }
+
+    private void LoadDocumentFromItems(bool isFullLoad)
     {
         var items = Items;
         if (items == null) return;
 
-        _undoStack.Clear();
-        _redoStack.Clear();
+        if (isFullLoad)
+        {
+            _undoStack.Clear();
+            _redoStack.Clear();
+        }
 
         using (SuppressSync())
         {
@@ -2066,10 +2185,21 @@ public class TodoListEditor : Control
             Caret = ClampCursorPosition(Caret);
             SelectionAnchor = ClampCursorPosition(SelectionAnchor);
         }
-        InvalidateMeasure();
+
+        if (isFullLoad)
+        {
+            InvalidateMeasure();
+            MarkClean();
+        }
+        else
+        {
+            _changeGeneration++;
+            UpdateDirtyState();
+            InvalidateMeasure();
+        }
     }
 
-    private void SyncToItems()
+    private void SyncToItems(ChangeKind kind = ChangeKind.TextChanged)
     {
         var items = Items;
         if (items == null || _suppressSyncCount > 0) return;
@@ -2101,7 +2231,203 @@ public class TodoListEditor : Control
             }
         }
         ItemsChanged?.Invoke(this, EventArgs.Empty);
+        ItemsDetailChanged?.Invoke(this, new TodoItemsChangedEventArgs(kind));
     }
+
+    // ---- Images collection ----
+
+    private void OnImagesPropertyChanged(IEnumerable<TodoImageEntry>? oldImages, IEnumerable<TodoImageEntry>? newImages)
+    {
+        UnsubscribeImages(oldImages);
+        RebuildImageCache();
+        SubscribeImages(newImages);
+        RefreshAllImageElements();
+    }
+
+    private void SubscribeImages(IEnumerable<TodoImageEntry>? images)
+    {
+        if (images is INotifyCollectionChanged ncc)
+            ncc.CollectionChanged += OnImagesCollectionChanged;
+        if (images != null)
+            foreach (var entry in images)
+                SubscribeImageEntry(entry);
+    }
+
+    private void UnsubscribeImages(IEnumerable<TodoImageEntry>? images)
+    {
+        UnsubscribeAllImageEntries();
+        if (images is INotifyCollectionChanged ncc)
+            ncc.CollectionChanged -= OnImagesCollectionChanged;
+    }
+
+    private void SubscribeImageEntry(TodoImageEntry entry)
+    {
+        entry.PropertyChanged += OnImageEntryPropertyChanged;
+        _subscribedImageEntries.Add(entry);
+    }
+
+    private void UnsubscribeAllImageEntries()
+    {
+        foreach (var entry in _subscribedImageEntries)
+            entry.PropertyChanged -= OnImageEntryPropertyChanged;
+        _subscribedImageEntries.Clear();
+    }
+
+    private void RebuildImageCache()
+    {
+        _imageCache.Clear();
+        var images = Images;
+        if (images == null) return;
+        foreach (var entry in images)
+        {
+            if (entry.Bitmap != null)
+                _imageCache[entry.Key] = entry.Bitmap;
+        }
+    }
+
+    private void SyncLegacyImageStoreFromCache()
+    {
+        _legacyImageStore.Clear();
+        foreach (var kvp in _imageCache)
+            _legacyImageStore[kvp.Key] = kvp.Value;
+    }
+
+    private void OnImagesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
+            UnsubscribeAllImageEntries();
+            _legacyImageStore.Clear();
+            if (Images != null)
+                foreach (var entry in Images)
+                    SubscribeImageEntry(entry);
+        }
+        else
+        {
+            if (e.OldItems != null)
+                foreach (TodoImageEntry entry in e.OldItems)
+                {
+                    entry.PropertyChanged -= OnImageEntryPropertyChanged;
+                    _subscribedImageEntries.Remove(entry);
+                    _legacyImageStore.Remove(entry.Key);
+                }
+            if (e.NewItems != null)
+                foreach (TodoImageEntry entry in e.NewItems)
+                {
+                    SubscribeImageEntry(entry);
+                    if (entry.Bitmap != null)
+                        _legacyImageStore[entry.Key] = entry.Bitmap;
+                }
+        }
+
+        RebuildImageCache();
+        RefreshAllImageElements();
+    }
+
+    private void OnImageEntryPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (sender is not TodoImageEntry entry) return;
+
+        if (e.PropertyName == nameof(TodoImageEntry.Bitmap))
+        {
+            if (entry.Bitmap != null)
+                _imageCache[entry.Key] = entry.Bitmap;
+            else
+                _imageCache.Remove(entry.Key);
+
+            RefreshImageElementsForKey(entry.Key);
+        }
+        else if (e.PropertyName == nameof(TodoImageEntry.Key))
+        {
+            RebuildImageCache();
+            SyncLegacyImageStoreFromCache();
+            RefreshAllImageElements();
+        }
+    }
+
+    private Bitmap? ResolveImageByKey(string key)
+    {
+        if (_imageCache.TryGetValue(key, out var cached)) return cached;
+        if (_legacyImageStore.TryGetValue(key, out var legacy)) return legacy;
+        return null;
+    }
+
+    private void RefreshAllImageElements()
+    {
+        bool changed = false;
+        using (SuppressSync())
+        {
+            for (int i = 0; i < Document.Items.Count; i++)
+                changed |= RefreshItemImages(Document.Items[i]);
+        }
+        if (changed) InvalidateMeasure();
+    }
+
+    private void RefreshImageElementsForKey(string key)
+    {
+        bool changed = false;
+        using (SuppressSync())
+        {
+            for (int i = 0; i < Document.Items.Count; i++)
+                changed |= RefreshItemImages(Document.Items[i], key);
+        }
+        if (changed) InvalidateMeasure();
+    }
+
+    private bool RefreshItemImages(TodoItem item, string? filterKey = null)
+    {
+        bool changed = false;
+        for (int j = 0; j < item.Elements.Count; j++)
+        {
+            var el = item.Elements[j];
+            if (el.UnresolvedImageKey != null && (filterKey == null || el.UnresolvedImageKey == filterKey))
+            {
+                var bitmap = ResolveImageByKey(el.UnresolvedImageKey);
+                if (bitmap != null)
+                {
+                    var imgEl = ContentElement.CreateImage(bitmap);
+                    imgEl.ImageKey = el.UnresolvedImageKey;
+                    imgEl.ImageAltText = el.ImageAltText;
+                    item.Elements[j] = imgEl;
+                    changed = true;
+                }
+            }
+            else if (el.Type == ContentElementType.Image && el.ImageKey != null
+                     && (filterKey == null || el.ImageKey == filterKey))
+            {
+                var bitmap = ResolveImageByKey(el.ImageKey);
+                if (bitmap != null && !ReferenceEquals(el.Image, bitmap))
+                {
+                    el.Image = bitmap;
+                    el.ImageWidth = bitmap.PixelSize.Width;
+                    el.ImageHeight = bitmap.PixelSize.Height;
+                    changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
+    // ---- IsDirty ----
+
+    private void SetDirtyState(bool dirty)
+    {
+        if (SetAndRaise(IsDirtyProperty, ref _isDirty, dirty))
+            DirtyChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void UpdateDirtyState()
+    {
+        SetDirtyState(_changeGeneration != _cleanGeneration);
+    }
+
+    public void MarkClean()
+    {
+        _cleanGeneration = _changeGeneration;
+        SetDirtyState(false);
+    }
+
+    // ---- Text parsing ----
 
     public TodoItem ParseTextToItem(string text)
     {
@@ -2116,7 +2442,8 @@ public class TodoListEditor : Control
             string altText = match.Groups[1].Value;
             string key = match.Groups[2].Value;
 
-            if (ImageStore.TryGetValue(key, out var bitmap))
+            var bitmap = ResolveImageByKey(key);
+            if (bitmap != null)
             {
                 var imgEl = ContentElement.CreateImage(bitmap);
                 imgEl.ImageKey = key;
@@ -2125,7 +2452,10 @@ public class TodoListEditor : Control
             }
             else
             {
-                item.Elements.Add(ContentElement.CreateText(match.Value));
+                var placeholder = ContentElement.CreateText(match.Value);
+                placeholder.UnresolvedImageKey = key;
+                placeholder.ImageAltText = altText;
+                item.Elements.Add(placeholder);
             }
 
             lastEnd = match.Index + match.Length;
@@ -2148,6 +2478,11 @@ public class TodoListEditor : Control
                 string alt = el.ImageAltText ?? "image";
                 sb.Append($"![{alt}]({key})");
             }
+            else if (el.UnresolvedImageKey != null)
+            {
+                string alt = el.ImageAltText ?? "image";
+                sb.Append($"![{alt}]({el.UnresolvedImageKey})");
+            }
             else
             {
                 sb.Append(el.Text);
@@ -2160,13 +2495,18 @@ public class TodoListEditor : Control
     {
         if (bitmap == null) return "unknown";
 
-        foreach (var kvp in ImageStore)
+        foreach (var kvp in _imageCache)
+        {
+            if (ReferenceEquals(kvp.Value, bitmap)) return kvp.Key;
+        }
+
+        foreach (var kvp in _legacyImageStore)
         {
             if (ReferenceEquals(kvp.Value, bitmap)) return kvp.Key;
         }
 
         string key = $"img_{Guid.NewGuid():N}";
-        ImageStore[key] = bitmap;
+        _imageCache[key] = bitmap;
         return key;
     }
 
@@ -2190,14 +2530,14 @@ public class TodoListEditor : Control
             SelectionAnchor = CursorPosition.Start;
         }
         InvalidateMeasure();
-        NotifyDocumentChanged();
+        NotifyDocumentChanged(ChangeKind.StructureChanged);
     }
 
     public void AddItem(string text, bool isChecked = false)
     {
         Document.Items.Add(new TodoItem(text, isChecked));
         InvalidateMeasure();
-        NotifyDocumentChanged();
+        NotifyDocumentChanged(ChangeKind.StructureChanged);
     }
 
     public void ToggleItem(int index)
@@ -2206,7 +2546,7 @@ public class TodoListEditor : Control
         {
             Document.Items[index].IsChecked = !Document.Items[index].IsChecked;
             InvalidateMeasure();
-            NotifyDocumentChanged();
+            NotifyDocumentChanged(ChangeKind.CheckedChanged);
         }
     }
 

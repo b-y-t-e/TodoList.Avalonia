@@ -22,6 +22,7 @@ public class ContentElement
     public double ImageHeight { get; set; }
     public string? ImageKey { get; set; }
     public string? ImageAltText { get; set; }
+    internal string? UnresolvedImageKey { get; set; }
     public FontFamily Font { get; set; } = FontFamily.Default;
     public double FontSize { get; set; }
     public bool Bold { get; set; }
@@ -60,6 +61,7 @@ public class ContentElement
             ImageHeight = ImageHeight,
             ImageKey = ImageKey,
             ImageAltText = ImageAltText,
+            UnresolvedImageKey = UnresolvedImageKey,
             Font = Font,
             FontSize = FontSize,
             Bold = Bold,
