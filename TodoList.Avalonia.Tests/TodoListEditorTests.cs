@@ -365,8 +365,10 @@ public class TodoListEditorTests
         editor.InsertTextAtCaret("test");
 
         var el = editor.Document.Items[0].Elements[0];
-        Assert.That(el.Font.Name, Is.EqualTo("Courier New"));
-        Assert.That(el.FontSize, Is.EqualTo(18));
+        Assert.That(el.Font, Is.EqualTo(FontFamily.Default));
+        Assert.That(el.FontSize, Is.EqualTo(0));
+        Assert.That(editor.Document.DefaultFont.Name, Is.EqualTo("Courier New"));
+        Assert.That(editor.Document.DefaultFontSize, Is.EqualTo(18));
     }
 
     // ---- Rich copy/paste ----

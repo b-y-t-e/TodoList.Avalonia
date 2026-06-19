@@ -23,11 +23,11 @@ public class ContentElement
     public string? ImageKey { get; set; }
     public string? ImageAltText { get; set; }
     public FontFamily Font { get; set; } = FontFamily.Default;
-    public double FontSize { get; set; } = 14;
+    public double FontSize { get; set; }
     public bool Bold { get; set; }
     public bool Italic { get; set; }
 
-    public static ContentElement CreateText(string text, FontFamily? font = null, double fontSize = 14)
+    public static ContentElement CreateText(string text, FontFamily? font = null, double fontSize = 0)
     {
         return new ContentElement
         {

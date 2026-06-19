@@ -526,8 +526,13 @@ public class TodoListEditor : Control
             var wLine = wrappedLines[li];
             bool isLastLine = li == wrappedLines.Count - 1;
 
+            bool nextStartsWithImage = !isLastLine
+                && wrappedLines[li + 1].Segments.Count > 0
+                && item.Elements[wrappedLines[li + 1].Segments[0].ElementIndex].Type == ContentElementType.Image;
+
             if (globalOffset < wLine.EndGlobalOffset
-                || (isLastLine && globalOffset <= wLine.EndGlobalOffset))
+                || (isLastLine && globalOffset <= wLine.EndGlobalOffset)
+                || (globalOffset == wLine.EndGlobalOffset && nextStartsWithImage))
             {
                 foreach (var seg in wLine.Segments)
                 {
@@ -803,6 +808,9 @@ public class TodoListEditor : Control
         currentLine.Height = lineH;
         currentLine.EndGlobalOffset = item.TextLength;
 
+        if (lines.Count > 1 && lines[^1].Segments.Count == 0)
+            lines.RemoveAt(lines.Count - 1);
+
         double y = 0;
         for (int i = 0; i < lines.Count; i++)
         {
@@ -872,6 +880,17 @@ public class TodoListEditor : Control
         }
 
         var cursor = HitTestCursor(pos);
+        var props = e.GetCurrentPoint(this).Properties;
+
+        if (e.ClickCount == 2 && props.IsLeftButtonPressed)
+        {
+            Caret = cursor;
+            SelectWordAtCaret();
+            _mouseSelecting = false;
+            InvalidateMeasure();
+            return;
+        }
+
         Caret = cursor;
 
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
@@ -1123,7 +1142,7 @@ public class TodoListEditor : Control
 
         if (item.Elements.Count == 0)
         {
-            item.Elements.Add(ContentElement.CreateText(text, Document.DefaultFont, Document.DefaultFontSize));
+            item.Elements.Add(ContentElement.CreateText(text));
             Caret = new CursorPosition(Caret.ItemIndex, text.Length);
         }
         else
@@ -1138,7 +1157,7 @@ public class TodoListEditor : Control
             }
             else
             {
-                var newEl = ContentElement.CreateText(text, Document.DefaultFont, Document.DefaultFontSize);
+                var newEl = ContentElement.CreateText(text);
                 item.Elements.Insert(elIdx + (localOff > 0 ? 1 : 0), newEl);
                 Caret = new CursorPosition(Caret.ItemIndex, offset + text.Length);
             }
@@ -1425,6 +1444,31 @@ public class TodoListEditor : Control
     }
 
     // ---- Selection ----
+
+    private void SelectWordAtCaret()
+    {
+        var item = Document.Items[Caret.ItemIndex];
+        if (item.TextLength == 0) return;
+
+        int offset = Math.Min(Caret.Offset, item.TextLength - 1);
+        var cls = item.ClassifyAt(offset);
+        if (cls == CharClass.Image)
+        {
+            SelectionAnchor = new CursorPosition(Caret.ItemIndex, offset);
+            Caret = new CursorPosition(Caret.ItemIndex, offset + 1);
+            return;
+        }
+
+        int left = offset;
+        while (left > 0 && item.ClassifyAt(left - 1) == cls)
+            left--;
+        int right = offset;
+        while (right < item.TextLength && item.ClassifyAt(right) == cls)
+            right++;
+
+        SelectionAnchor = new CursorPosition(Caret.ItemIndex, left);
+        Caret = new CursorPosition(Caret.ItemIndex, right);
+    }
 
     public void SelectAll()
     {
@@ -2041,7 +2085,7 @@ public class TodoListEditor : Control
         ItemsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    internal TodoItem ParseTextToItem(string text)
+    public TodoItem ParseTextToItem(string text)
     {
         var item = new TodoItem();
         int lastEnd = 0;
@@ -2049,8 +2093,7 @@ public class TodoListEditor : Control
         foreach (Match match in ImagePattern.Matches(text))
         {
             if (match.Index > lastEnd)
-                item.Elements.Add(ContentElement.CreateText(
-                    text[lastEnd..match.Index], Document.DefaultFont, Document.DefaultFontSize));
+                item.Elements.Add(ContentElement.CreateText(text[lastEnd..match.Index]));
 
             string altText = match.Groups[1].Value;
             string key = match.Groups[2].Value;
@@ -2064,16 +2107,14 @@ public class TodoListEditor : Control
             }
             else
             {
-                item.Elements.Add(ContentElement.CreateText(
-                    match.Value, Document.DefaultFont, Document.DefaultFontSize));
+                item.Elements.Add(ContentElement.CreateText(match.Value));
             }
 
             lastEnd = match.Index + match.Length;
         }
 
         if (lastEnd < text.Length)
-            item.Elements.Add(ContentElement.CreateText(
-                text[lastEnd..], Document.DefaultFont, Document.DefaultFontSize));
+            item.Elements.Add(ContentElement.CreateText(text[lastEnd..]));
 
         return item;
     }
