@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -22,6 +25,9 @@ public class TodoListEditor : Control
     public static readonly StyledProperty<double> DefaultFontSizeProperty =
         AvaloniaProperty.Register<TodoListEditor, double>(nameof(DefaultFontSize), 14.0);
 
+    public static readonly StyledProperty<IList<TodoItemData>?> ItemsProperty =
+        AvaloniaProperty.Register<TodoListEditor, IList<TodoItemData>?>(nameof(Items));
+
     public FontFamily DefaultFont
     {
         get => GetValue(DefaultFontProperty);
@@ -33,6 +39,16 @@ public class TodoListEditor : Control
         get => GetValue(DefaultFontSizeProperty);
         set => SetValue(DefaultFontSizeProperty, value);
     }
+
+    public IList<TodoItemData>? Items
+    {
+        get => GetValue(ItemsProperty);
+        set => SetValue(ItemsProperty, value);
+    }
+
+    public Dictionary<string, Bitmap> ImageStore { get; } = new();
+
+    public event EventHandler? ItemsChanged;
 
     public TodoDocument Document { get; } = new();
     public CursorPosition Caret { get; set; } = CursorPosition.Start;
@@ -61,6 +77,37 @@ public class TodoListEditor : Control
 
     private List<List<ContentElement>>? _internalClipboard;
     private string? _internalClipboardText;
+    private int _suppressSyncCount;
+
+    private SyncGuard SuppressSync() => new(this);
+
+    private readonly struct SyncGuard : IDisposable
+    {
+        private readonly TodoListEditor _editor;
+        public SyncGuard(TodoListEditor editor)
+        {
+            _editor = editor;
+            _editor._suppressSyncCount++;
+        }
+        public void Dispose() => _editor._suppressSyncCount--;
+    }
+
+    private const int MaxUndoSteps = 100;
+    private const long CoalesceThresholdMs = 800;
+    private readonly List<UndoSnapshot> _undoStack = new();
+    private readonly List<UndoSnapshot> _redoStack = new();
+    private UndoActionKind _lastUndoAction;
+    private long _lastUndoTimestamp;
+
+    internal enum UndoActionKind { Other, Typing, Backspace, Delete }
+
+    private record UndoSnapshot(
+        List<(bool IsChecked, List<ContentElement> Elements)> Items,
+        CursorPosition Caret,
+        CursorPosition Anchor);
+
+    private static readonly Regex ImagePattern =
+        new(@"!\[([^\]]*)\]\(([^)]+)\)", RegexOptions.Compiled);
 
     public SelectionRange CurrentSelection => new(SelectionAnchor, Caret);
 
@@ -91,6 +138,21 @@ public class TodoListEditor : Control
         SyncDocumentDefaults();
     }
 
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        UnsubscribeItems(Items);
+    }
+
+    private void UnsubscribeItems(IList<TodoItemData>? items)
+    {
+        if (items == null) return;
+        if (items is INotifyCollectionChanged ncc)
+            ncc.CollectionChanged -= OnItemsCollectionChanged;
+        foreach (var item in items)
+            item.PropertyChanged -= OnItemDataPropertyChanged;
+    }
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -98,6 +160,12 @@ public class TodoListEditor : Control
         {
             SyncDocumentDefaults();
             InvalidateMeasure();
+        }
+        else if (change.Property == ItemsProperty)
+        {
+            OnItemsPropertyChanged(
+                change.OldValue as IList<TodoItemData>,
+                change.NewValue as IList<TodoItemData>);
         }
     }
 
@@ -367,12 +435,24 @@ public class TodoListEditor : Control
 
                 if (targetX <= seg.X + seg.Width)
                 {
-                    double cx = seg.X;
-                    for (int ci = 0; ci < segText.Length; ci++)
+                    // binary search: O(log n) MeasureTextWidth calls instead of O(n)
+                    double relX = targetX - seg.X;
+                    int lo = 0, hi = segText.Length;
+                    while (lo < hi)
                     {
-                        double cw = MeasureTextWidth(segText[ci].ToString(), typeface, fs);
-                        if (targetX < cx + cw / 2) return segGlobalStart + ci;
-                        cx += cw;
+                        int mid = (lo + hi) / 2;
+                        double w = MeasureTextWidth(segText[..(mid + 1)], typeface, fs);
+                        if (w <= relX)
+                            lo = mid + 1;
+                        else
+                            hi = mid;
+                    }
+                    if (lo < segText.Length)
+                    {
+                        double leftEdge = lo > 0 ? MeasureTextWidth(segText[..lo], typeface, fs) : 0;
+                        double charW = MeasureTextWidth(segText[lo..(lo + 1)], typeface, fs);
+                        if (relX < leftEdge + charW / 2) return segGlobalStart + lo;
+                        return segGlobalStart + lo + 1;
                     }
                     return segGlobalStart + segText.Length;
                 }
@@ -535,19 +615,34 @@ public class TodoListEditor : Control
     {
         if (availWidth <= 0) return start;
 
-        int lastSpace = -1;
-        double currentWidth = 0;
-        for (int i = start; i < text.Length; i++)
+        int len = text.Length - start;
+        if (len <= 0) return start;
+
+        if (MeasureTextWidth(text[start..], typeface, fontSize) <= availWidth)
+            return text.Length;
+
+        // binary search: O(log n) MeasureTextWidth calls instead of O(n)
+        int lo = 1, hi = len;
+        while (lo < hi)
         {
-            currentWidth += MeasureTextWidth(text[i].ToString(), typeface, fontSize);
-            if (currentWidth > availWidth)
-            {
-                if (lastSpace > start) return lastSpace + 1;
-                return i > start ? i : start;
-            }
-            if (text[i] == ' ') lastSpace = i;
+            int mid = (lo + hi) / 2;
+            double w = MeasureTextWidth(text[start..(start + mid)], typeface, fontSize);
+            if (w <= availWidth)
+                lo = mid + 1;
+            else
+                hi = mid;
         }
-        return text.Length;
+
+        int fitCount = lo - 1;
+        int breakAt = start + fitCount;
+
+        if (breakAt > start)
+        {
+            int lastSpace = text.LastIndexOf(' ', breakAt - 1, breakAt - start);
+            if (lastSpace > start) return lastSpace + 1;
+        }
+
+        return breakAt > start ? breakAt : start;
     }
 
     // ---- Mouse input ----
@@ -564,8 +659,10 @@ public class TodoListEditor : Control
             int itemIdx = HitTestItem(pos.Y);
             if (itemIdx >= 0 && itemIdx < Document.Items.Count)
             {
+                SaveUndoState();
                 Document.Items[itemIdx].IsChecked = !Document.Items[itemIdx].IsChecked;
                 InvalidateMeasure();
+                NotifyDocumentChanged();
             }
             return;
         }
@@ -653,6 +750,7 @@ public class TodoListEditor : Control
         base.OnTextInput(e);
         if (string.IsNullOrEmpty(e.Text)) return;
 
+        SaveUndoState(HasSelection ? UndoActionKind.Other : UndoActionKind.Typing);
         DeleteSelection();
         InsertTextAtCaret(e.Text);
         e.Handled = true;
@@ -667,12 +765,14 @@ public class TodoListEditor : Control
         switch (e.Key)
         {
             case Key.Enter:
+                SaveUndoState();
                 DeleteSelection();
                 SplitItemAtCaret();
                 e.Handled = true;
                 break;
 
             case Key.Back:
+                SaveUndoState(HasSelection ? UndoActionKind.Other : UndoActionKind.Backspace);
                 if (HasSelection)
                     DeleteSelection();
                 else
@@ -681,6 +781,7 @@ public class TodoListEditor : Control
                 break;
 
             case Key.Delete:
+                SaveUndoState(HasSelection ? UndoActionKind.Other : UndoActionKind.Delete);
                 if (HasSelection)
                     DeleteSelection();
                 else
@@ -735,13 +836,25 @@ public class TodoListEditor : Control
                 break;
 
             case Key.X when ctrl:
+                SaveUndoState();
                 CopyToClipboard();
                 DeleteSelection();
                 e.Handled = true;
                 break;
 
             case Key.V when ctrl:
+                SaveUndoState();
                 _ = PasteFromClipboard();
+                e.Handled = true;
+                break;
+
+            case Key.Z when ctrl:
+                Undo();
+                e.Handled = true;
+                break;
+
+            case Key.Y when ctrl:
+                Redo();
                 e.Handled = true;
                 break;
         }
@@ -782,6 +895,7 @@ public class TodoListEditor : Control
 
         ClearSelectionNoDelete();
         InvalidateMeasure();
+        NotifyDocumentChanged();
     }
 
     public void InsertImageAtCaret(Bitmap bitmap)
@@ -821,6 +935,7 @@ public class TodoListEditor : Control
 
         ClearSelectionNoDelete();
         InvalidateMeasure();
+        NotifyDocumentChanged();
     }
 
     public void SplitItemAtCaret()
@@ -879,6 +994,7 @@ public class TodoListEditor : Control
         Caret = new CursorPosition(Caret.ItemIndex + 1, 0);
         ClearSelectionNoDelete();
         InvalidateMeasure();
+        NotifyDocumentChanged();
     }
 
     private void HandleBackspace()
@@ -922,6 +1038,7 @@ public class TodoListEditor : Control
 
         ClearSelectionNoDelete();
         InvalidateMeasure();
+        NotifyDocumentChanged();
     }
 
     private void HandleDelete()
@@ -956,6 +1073,7 @@ public class TodoListEditor : Control
         }
 
         InvalidateMeasure();
+        NotifyDocumentChanged();
     }
 
     public void DeleteSelection()
@@ -991,6 +1109,7 @@ public class TodoListEditor : Control
         ClearSelectionNoDelete();
         EnsureNonEmpty();
         InvalidateMeasure();
+        NotifyDocumentChanged();
     }
 
     private void DeleteRange(TodoItem item, int fromOffset, int toOffset)
@@ -1192,19 +1311,23 @@ public class TodoListEditor : Control
 
     private void PasteRichContent(List<List<ContentElement>> lines)
     {
-        DeleteSelection();
-        for (int i = 0; i < lines.Count; i++)
+        using (SuppressSync())
         {
-            foreach (var el in lines[i])
+            DeleteSelection();
+            for (int i = 0; i < lines.Count; i++)
             {
-                if (el.Type == ContentElementType.Image && el.Image != null)
-                    InsertImageAtCaret(el.Image);
-                else if (el.Type == ContentElementType.Text && el.Text.Length > 0)
-                    InsertTextAtCaret(el.Text);
+                foreach (var el in lines[i])
+                {
+                    if (el.Type == ContentElementType.Image && el.Image != null)
+                        InsertImageAtCaret(el.Image);
+                    else if (el.Type == ContentElementType.Text && el.Text.Length > 0)
+                        InsertTextAtCaret(el.Text);
+                }
+                if (i < lines.Count - 1)
+                    SplitItemAtCaret();
             }
-            if (i < lines.Count - 1)
-                SplitItemAtCaret();
         }
+        NotifyDocumentChanged();
     }
 
     private static bool TryLoadBitmap(object? data, out Bitmap? bitmap)
@@ -1235,16 +1358,20 @@ public class TodoListEditor : Control
 
     public void PasteMultilineText(string text)
     {
-        DeleteSelection();
-        var lines = text.Split('\n');
-        for (int i = 0; i < lines.Length; i++)
+        using (SuppressSync())
         {
-            var line = lines[i].TrimEnd('\r');
-            if (line.Length > 0)
-                InsertTextAtCaret(line);
-            if (i < lines.Length - 1)
-                SplitItemAtCaret();
+            DeleteSelection();
+            var lines = text.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i].TrimEnd('\r');
+                if (line.Length > 0)
+                    InsertTextAtCaret(line);
+                if (i < lines.Length - 1)
+                    SplitItemAtCaret();
+            }
         }
+        NotifyDocumentChanged();
     }
 
     // ---- Caret movement ----
@@ -1354,7 +1481,87 @@ public class TodoListEditor : Control
         InvalidateMeasure();
     }
 
+    // ---- Undo / Redo ----
+
+    private UndoSnapshot CaptureSnapshot()
+    {
+        var items = new List<(bool, List<ContentElement>)>();
+        foreach (var item in Document.Items)
+        {
+            var elements = new List<ContentElement>();
+            foreach (var el in item.Elements) elements.Add(el.Clone());
+            items.Add((item.IsChecked, elements));
+        }
+        return new UndoSnapshot(items, Caret, SelectionAnchor);
+    }
+
+    private void RestoreSnapshot(UndoSnapshot snapshot)
+    {
+        using (SuppressSync())
+        {
+            Document.Items.Clear();
+            foreach (var (isChecked, elements) in snapshot.Items)
+            {
+                var item = new TodoItem { IsChecked = isChecked };
+                foreach (var el in elements) item.Elements.Add(el.Clone());
+                Document.Items.Add(item);
+            }
+            if (Document.Items.Count == 0)
+                Document.Items.Add(new TodoItem());
+
+            Caret = ClampCursorPosition(snapshot.Caret);
+            SelectionAnchor = ClampCursorPosition(snapshot.Anchor);
+        }
+        InvalidateMeasure();
+        NotifyDocumentChanged();
+    }
+
+    internal void SaveUndoState(UndoActionKind action = UndoActionKind.Other)
+    {
+        long now = Environment.TickCount64;
+        bool coalesce = action != UndoActionKind.Other
+            && action == _lastUndoAction
+            && (now - _lastUndoTimestamp) < CoalesceThresholdMs
+            && _undoStack.Count > 0;
+
+        _lastUndoAction = action;
+        _lastUndoTimestamp = now;
+
+        if (coalesce) { _redoStack.Clear(); return; }
+
+        _undoStack.Add(CaptureSnapshot());
+        if (_undoStack.Count > MaxUndoSteps)
+            _undoStack.RemoveAt(0);
+        _redoStack.Clear();
+    }
+
+    public void Undo()
+    {
+        if (_undoStack.Count == 0) return;
+        _redoStack.Add(CaptureSnapshot());
+        var snapshot = _undoStack[^1];
+        _undoStack.RemoveAt(_undoStack.Count - 1);
+        RestoreSnapshot(snapshot);
+    }
+
+    public void Redo()
+    {
+        if (_redoStack.Count == 0) return;
+        _undoStack.Add(CaptureSnapshot());
+        var snapshot = _redoStack[^1];
+        _redoStack.RemoveAt(_redoStack.Count - 1);
+        RestoreSnapshot(snapshot);
+    }
+
     // ---- Helpers ----
+
+    private CursorPosition ClampCursorPosition(CursorPosition pos)
+    {
+        int maxItem = Document.Items.Count - 1;
+        int itemIdx = Math.Clamp(pos.ItemIndex, 0, maxItem);
+        int offset = Math.Clamp(pos.Offset, 0, Document.Items[itemIdx].TextLength);
+        return new CursorPosition(itemIdx, offset);
+    }
 
     private void EnsureValidCaret()
     {
@@ -1371,26 +1578,231 @@ public class TodoListEditor : Control
             Document.Items.Add(new TodoItem());
     }
 
+    // ---- MVVM synchronization ----
+
+    private void NotifyDocumentChanged()
+    {
+        if (_suppressSyncCount == 0)
+            SyncToItems();
+    }
+
+    private void OnItemsPropertyChanged(IList<TodoItemData>? oldItems, IList<TodoItemData>? newItems)
+    {
+        UnsubscribeItems(oldItems);
+
+        if (newItems is INotifyCollectionChanged newNcc)
+            newNcc.CollectionChanged += OnItemsCollectionChanged;
+        if (newItems != null)
+            foreach (var item in newItems)
+                item.PropertyChanged += OnItemDataPropertyChanged;
+
+        SyncFromItems();
+    }
+
+    private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (_suppressSyncCount > 0) return;
+
+        if (e.OldItems != null)
+            foreach (TodoItemData item in e.OldItems)
+                item.PropertyChanged -= OnItemDataPropertyChanged;
+        if (e.NewItems != null)
+            foreach (TodoItemData item in e.NewItems)
+                item.PropertyChanged += OnItemDataPropertyChanged;
+
+        SyncFromItems();
+    }
+
+    private void OnItemDataPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_suppressSyncCount > 0 || sender is not TodoItemData data) return;
+
+        var items = Items;
+        if (items == null) return;
+
+        int idx = -1;
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (ReferenceEquals(items[i], data)) { idx = i; break; }
+        }
+        if (idx < 0 || idx >= Document.Items.Count) return;
+
+        using (SuppressSync())
+        {
+            if (e.PropertyName == nameof(TodoItemData.IsChecked))
+            {
+                Document.Items[idx].IsChecked = data.IsChecked;
+            }
+            else if (e.PropertyName == nameof(TodoItemData.Text))
+            {
+                var newItem = ParseTextToItem(data.Text);
+                newItem.IsChecked = data.IsChecked;
+                Document.Items[idx] = newItem;
+            }
+        }
+        InvalidateMeasure();
+    }
+
+    private void SyncFromItems()
+    {
+        var items = Items;
+        if (items == null) return;
+
+        _undoStack.Clear();
+        _redoStack.Clear();
+
+        using (SuppressSync())
+        {
+            Document.Items.Clear();
+
+            foreach (var data in items)
+            {
+                var item = ParseTextToItem(data.Text);
+                item.IsChecked = data.IsChecked;
+                Document.Items.Add(item);
+            }
+
+            if (Document.Items.Count == 0)
+                Document.Items.Add(new TodoItem());
+
+            Caret = ClampCursorPosition(Caret);
+            SelectionAnchor = ClampCursorPosition(SelectionAnchor);
+        }
+        InvalidateMeasure();
+    }
+
+    private void SyncToItems()
+    {
+        var items = Items;
+        if (items == null || _suppressSyncCount > 0) return;
+
+        using (SuppressSync())
+        {
+            for (int i = 0; i < Document.Items.Count; i++)
+            {
+                var text = SerializeItemToText(Document.Items[i]);
+                var isChecked = Document.Items[i].IsChecked;
+
+                if (i < items.Count)
+                {
+                    if (items[i].Text != text) items[i].Text = text;
+                    if (items[i].IsChecked != isChecked) items[i].IsChecked = isChecked;
+                }
+                else
+                {
+                    var newData = new TodoItemData(text, isChecked);
+                    newData.PropertyChanged += OnItemDataPropertyChanged;
+                    items.Add(newData);
+                }
+            }
+
+            while (items.Count > Document.Items.Count)
+            {
+                items[items.Count - 1].PropertyChanged -= OnItemDataPropertyChanged;
+                items.RemoveAt(items.Count - 1);
+            }
+        }
+        ItemsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    internal TodoItem ParseTextToItem(string text)
+    {
+        var item = new TodoItem();
+        int lastEnd = 0;
+
+        foreach (Match match in ImagePattern.Matches(text))
+        {
+            if (match.Index > lastEnd)
+                item.Elements.Add(ContentElement.CreateText(
+                    text[lastEnd..match.Index], Document.DefaultFont, Document.DefaultFontSize));
+
+            string altText = match.Groups[1].Value;
+            string key = match.Groups[2].Value;
+
+            if (ImageStore.TryGetValue(key, out var bitmap))
+            {
+                var imgEl = ContentElement.CreateImage(bitmap);
+                imgEl.ImageKey = key;
+                imgEl.ImageAltText = altText;
+                item.Elements.Add(imgEl);
+            }
+            else
+            {
+                item.Elements.Add(ContentElement.CreateText(
+                    match.Value, Document.DefaultFont, Document.DefaultFontSize));
+            }
+
+            lastEnd = match.Index + match.Length;
+        }
+
+        if (lastEnd < text.Length)
+            item.Elements.Add(ContentElement.CreateText(
+                text[lastEnd..], Document.DefaultFont, Document.DefaultFontSize));
+
+        return item;
+    }
+
+    internal string SerializeItemToText(TodoItem item)
+    {
+        var sb = new StringBuilder();
+        foreach (var el in item.Elements)
+        {
+            if (el.Type == ContentElementType.Image)
+            {
+                string key = el.ImageKey ?? GetOrCreateImageKey(el.Image);
+                string alt = el.ImageAltText ?? "image";
+                sb.Append($"![{alt}]({key})");
+            }
+            else
+            {
+                sb.Append(el.Text);
+            }
+        }
+        return sb.ToString();
+    }
+
+    private string GetOrCreateImageKey(Bitmap? bitmap)
+    {
+        if (bitmap == null) return "unknown";
+
+        foreach (var kvp in ImageStore)
+        {
+            if (ReferenceEquals(kvp.Value, bitmap)) return kvp.Key;
+        }
+
+        string key = $"img_{Guid.NewGuid():N}";
+        ImageStore[key] = bitmap;
+        return key;
+    }
+
     // ---- Public API ----
 
     public string GetText() => Document.GetAllText();
 
     public void SetText(string text)
     {
-        Document.Items.Clear();
-        foreach (var line in text.Split('\n'))
-            Document.Items.Add(new TodoItem(line.TrimEnd('\r')));
-        if (Document.Items.Count == 0)
-            Document.Items.Add(new TodoItem());
-        Caret = CursorPosition.Start;
-        SelectionAnchor = CursorPosition.Start;
+        _undoStack.Clear();
+        _redoStack.Clear();
+
+        using (SuppressSync())
+        {
+            Document.Items.Clear();
+            foreach (var line in text.Split('\n'))
+                Document.Items.Add(new TodoItem(line.TrimEnd('\r')));
+            if (Document.Items.Count == 0)
+                Document.Items.Add(new TodoItem());
+            Caret = CursorPosition.Start;
+            SelectionAnchor = CursorPosition.Start;
+        }
         InvalidateMeasure();
+        NotifyDocumentChanged();
     }
 
     public void AddItem(string text, bool isChecked = false)
     {
         Document.Items.Add(new TodoItem(text, isChecked));
         InvalidateMeasure();
+        NotifyDocumentChanged();
     }
 
     public void ToggleItem(int index)
@@ -1399,6 +1811,7 @@ public class TodoListEditor : Control
         {
             Document.Items[index].IsChecked = !Document.Items[index].IsChecked;
             InvalidateMeasure();
+            NotifyDocumentChanged();
         }
     }
 
