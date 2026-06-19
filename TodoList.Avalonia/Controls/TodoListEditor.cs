@@ -11,6 +11,7 @@ using global::Avalonia.Controls;
 using global::Avalonia.Controls.Primitives;
 using global::Avalonia.Input;
 using global::Avalonia.Layout;
+using global::Avalonia.Input.Platform;
 using global::Avalonia.Media;
 using global::Avalonia.Media.Imaging;
 using TodoList.Avalonia.Model;
@@ -19,8 +20,13 @@ namespace TodoList.Avalonia.Controls;
 
 public enum ImageDisplayMode { Inline, Block }
 
+public enum EditorTheme { None, Light, Dark }
+
 public class TodoListEditor : Control
 {
+    public static readonly StyledProperty<EditorTheme> ColorThemeProperty =
+        AvaloniaProperty.Register<TodoListEditor, EditorTheme>(nameof(ColorTheme), EditorTheme.Light);
+
     public static readonly StyledProperty<FontFamily> DefaultFontProperty =
         AvaloniaProperty.Register<TodoListEditor, FontFamily>(nameof(DefaultFont), FontFamily.Default);
 
@@ -79,6 +85,12 @@ public class TodoListEditor : Control
 
     public static readonly StyledProperty<double> WrapLineSpacingProperty =
         AvaloniaProperty.Register<TodoListEditor, double>(nameof(WrapLineSpacing), 2.0);
+
+    public EditorTheme ColorTheme
+    {
+        get => GetValue(ColorThemeProperty);
+        set => SetValue(ColorThemeProperty, value);
+    }
 
     public FontFamily DefaultFont
     {
@@ -307,6 +319,10 @@ public class TodoListEditor : Control
         {
             InvalidateMeasure();
         }
+        else if (change.Property == ColorThemeProperty)
+        {
+            ApplyTheme((EditorTheme)change.NewValue!);
+        }
         else if (change.Property == BackgroundBrushProperty
             || change.Property == ForegroundProperty
             || change.Property == CheckedForegroundProperty
@@ -324,6 +340,36 @@ public class TodoListEditor : Control
             OnItemsPropertyChanged(
                 change.OldValue as IList<TodoItemData>,
                 change.NewValue as IList<TodoItemData>);
+        }
+    }
+
+    private void ApplyTheme(EditorTheme theme)
+    {
+        if (theme == EditorTheme.None) return;
+
+        if (theme == EditorTheme.Light)
+        {
+            BackgroundBrush = Brushes.White;
+            Foreground = Brushes.Black;
+            CheckedForeground = Brushes.Gray;
+            SelectionBrush = new SolidColorBrush(Color.FromArgb(80, 30, 144, 255));
+            CaretBrush = Brushes.Black;
+            CheckboxCheckedBrush = Brushes.DodgerBlue;
+            CheckboxUncheckedBrush = Brushes.White;
+            CheckboxBorderBrush = Brushes.Gray;
+            CheckmarkBrush = Brushes.White;
+        }
+        else if (theme == EditorTheme.Dark)
+        {
+            BackgroundBrush = new SolidColorBrush(Color.FromRgb(30, 30, 30));
+            Foreground = new SolidColorBrush(Color.FromRgb(220, 220, 220));
+            CheckedForeground = new SolidColorBrush(Color.FromRgb(120, 120, 120));
+            SelectionBrush = new SolidColorBrush(Color.FromArgb(80, 60, 140, 230));
+            CaretBrush = Brushes.White;
+            CheckboxCheckedBrush = new SolidColorBrush(Color.FromRgb(55, 148, 255));
+            CheckboxUncheckedBrush = new SolidColorBrush(Color.FromRgb(50, 50, 50));
+            CheckboxBorderBrush = new SolidColorBrush(Color.FromRgb(100, 100, 100));
+            CheckmarkBrush = Brushes.White;
         }
     }
 
@@ -1567,7 +1613,7 @@ public class TodoListEditor : Control
     {
         if (TopLevel.GetTopLevel(this) is not { Clipboard: { } clipboard }) return;
 
-        var sysText = await clipboard.GetTextAsync();
+        var sysText = await clipboard.TryGetTextAsync();
 
         if (_internalClipboard != null && _internalClipboardText != null
             && sysText == _internalClipboardText)
@@ -1576,21 +1622,19 @@ public class TodoListEditor : Control
             return;
         }
 
-        var formats = await clipboard.GetFormatsAsync();
-
-        string[] imageFormats = ["PNG", "image/png", "Bitmap", "image/bmp",
-            "DeviceIndependentBitmap", "CF_DIB", "CF_DIBV5"];
-
-        foreach (var imgFmt in imageFormats)
+        var image = await clipboard.TryGetBitmapAsync();
+        if (image is Bitmap bmp)
         {
-            if (!formats.Contains(imgFmt)) continue;
-
-            var data = await clipboard.GetDataAsync(imgFmt);
-            if (TryLoadBitmap(data, out var bmp))
-            {
-                InsertImageAtCaret(bmp!);
-                return;
-            }
+            InsertImageAtCaret(bmp);
+            return;
+        }
+        else if (image != null)
+        {
+            using var ms = new MemoryStream();
+            image.Save(ms);
+            ms.Position = 0;
+            InsertImageAtCaret(new Bitmap(ms));
+            return;
         }
 
         if (!string.IsNullOrEmpty(sysText))
@@ -1622,32 +1666,6 @@ public class TodoListEditor : Control
             }
         }
         NotifyDocumentChanged();
-    }
-
-    private static bool TryLoadBitmap(object? data, out Bitmap? bitmap)
-    {
-        bitmap = null;
-        try
-        {
-            switch (data)
-            {
-                case byte[] bytes:
-                    bitmap = new Bitmap(new MemoryStream(bytes));
-                    return true;
-                case Stream stream:
-                    bitmap = new Bitmap(stream);
-                    return true;
-                case Bitmap bmp:
-                    bitmap = bmp;
-                    return true;
-                default:
-                    return false;
-            }
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     public void PasteMultilineText(string text)

@@ -28,7 +28,8 @@ dotnet add package TodoList.Avalonia
 var editor = new TodoListEditor
 {
     DefaultFont = new FontFamily("Segoe UI"),
-    DefaultFontSize = 15
+    DefaultFontSize = 15,
+    ColorTheme = EditorTheme.Dark // Light (default), Dark, or None for manual control
 };
 
 // Add items directly

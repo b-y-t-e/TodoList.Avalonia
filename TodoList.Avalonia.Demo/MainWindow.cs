@@ -126,11 +126,27 @@ public class MainWindow : Window
             }
         };
 
+        var themeCombo = new ComboBox
+        {
+            Items = { "Light", "Dark" },
+            SelectedIndex = 0,
+            Margin = new Thickness(4),
+            Width = 80
+        };
+        themeCombo.SelectionChanged += (_, _) =>
+        {
+            if (themeCombo.SelectedItem is string t)
+            {
+                _editor.ColorTheme = t == "Dark" ? EditorTheme.Dark : EditorTheme.Light;
+                _editor.Focus();
+            }
+        };
+
         var toolbar = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Margin = new Thickness(4),
-            Children = { addButton, checkAllButton, uncheckAllButton, fontCombo, fontSizeCombo, imageDisplayCombo }
+            Children = { addButton, checkAllButton, uncheckAllButton, fontCombo, fontSizeCombo, imageDisplayCombo, themeCombo }
         };
 
         var scrollViewer = new ScrollViewer
