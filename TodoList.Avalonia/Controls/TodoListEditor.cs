@@ -65,6 +65,21 @@ public class TodoListEditor : Control
     public static readonly StyledProperty<IBrush> CheckmarkBrushProperty =
         AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(CheckmarkBrush), Brushes.White);
 
+    public static readonly StyledProperty<Thickness> EditorPaddingProperty =
+        AvaloniaProperty.Register<TodoListEditor, Thickness>(nameof(EditorPadding), new Thickness(32, 8, 8, 8));
+
+    public static readonly StyledProperty<double> CheckboxSizeProperty =
+        AvaloniaProperty.Register<TodoListEditor, double>(nameof(CheckboxSize), 16.0);
+
+    public static readonly StyledProperty<double> CheckboxMarginRightProperty =
+        AvaloniaProperty.Register<TodoListEditor, double>(nameof(CheckboxMarginRight), 8.0);
+
+    public static readonly StyledProperty<double> LineSpacingProperty =
+        AvaloniaProperty.Register<TodoListEditor, double>(nameof(LineSpacing), 6.0);
+
+    public static readonly StyledProperty<double> WrapLineSpacingProperty =
+        AvaloniaProperty.Register<TodoListEditor, double>(nameof(WrapLineSpacing), 2.0);
+
     public FontFamily DefaultFont
     {
         get => GetValue(DefaultFontProperty);
@@ -149,6 +164,36 @@ public class TodoListEditor : Control
         set => SetValue(CheckmarkBrushProperty, value);
     }
 
+    public Thickness EditorPadding
+    {
+        get => GetValue(EditorPaddingProperty);
+        set => SetValue(EditorPaddingProperty, value);
+    }
+
+    public double CheckboxSize
+    {
+        get => GetValue(CheckboxSizeProperty);
+        set => SetValue(CheckboxSizeProperty, value);
+    }
+
+    public double CheckboxMarginRight
+    {
+        get => GetValue(CheckboxMarginRightProperty);
+        set => SetValue(CheckboxMarginRightProperty, value);
+    }
+
+    public double LineSpacing
+    {
+        get => GetValue(LineSpacingProperty);
+        set => SetValue(LineSpacingProperty, value);
+    }
+
+    public double WrapLineSpacing
+    {
+        get => GetValue(WrapLineSpacingProperty);
+        set => SetValue(WrapLineSpacingProperty, value);
+    }
+
     public Dictionary<string, Bitmap> ImageStore { get; } = new();
 
     public event EventHandler? ItemsChanged;
@@ -159,14 +204,6 @@ public class TodoListEditor : Control
     public bool HasSelection => !CurrentSelection.IsEmpty;
 
     private bool _mouseSelecting;
-
-    private const double PaddingLeft = 32;
-    private const double PaddingTop = 8;
-    private const double PaddingRight = 8;
-    private const double CheckboxSize = 16;
-    private const double CheckboxMarginRight = 8;
-    private const double LineSpacing = 6;
-    private const double WrapLineSpacing = 2;
 
     private readonly List<double> _itemYPositions = new();
     private readonly List<double> _itemHeights = new();
@@ -261,7 +298,12 @@ public class TodoListEditor : Control
             InvalidateMeasure();
         }
         else if (change.Property == InlineImageMaxHeightProperty
-            || change.Property == ImageDisplayProperty)
+            || change.Property == ImageDisplayProperty
+            || change.Property == EditorPaddingProperty
+            || change.Property == CheckboxSizeProperty
+            || change.Property == CheckboxMarginRightProperty
+            || change.Property == LineSpacingProperty
+            || change.Property == WrapLineSpacingProperty)
         {
             InvalidateMeasure();
         }
@@ -299,8 +341,8 @@ public class TodoListEditor : Control
         _itemHeights.Clear();
         _itemWrapping.Clear();
 
-        double availWidth = Math.Max((_desiredWidth > 0 ? _desiredWidth : 400) - PaddingLeft - PaddingRight, 50);
-        double y = PaddingTop;
+        double availWidth = Math.Max((_desiredWidth > 0 ? _desiredWidth : 400) - EditorPadding.Left - EditorPadding.Right, 50);
+        double y = EditorPadding.Top;
 
         for (int i = 0; i < Document.Items.Count; i++)
         {
@@ -322,7 +364,7 @@ public class TodoListEditor : Control
             y += itemH + LineSpacing;
         }
 
-        _desiredHeight = y + PaddingTop;
+        _desiredHeight = y + EditorPadding.Top;
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -363,13 +405,14 @@ public class TodoListEditor : Control
             double itemY = _itemYPositions[i];
             var wrappedLines = _itemWrapping[i];
 
-            DrawCheckbox(context, 8, itemY + 1, item.IsChecked);
+            double cbX = (EditorPadding.Left - CheckboxSize) / 2;
+            DrawCheckbox(context, cbX, itemY + 1, item.IsChecked);
 
             if (item.Elements.Count == 0)
             {
                 if (i == Caret.ItemIndex && !HasSelection)
                     context.FillRectangle(CaretBrush,
-                        new Rect(PaddingLeft, itemY, 1.5, Document.DefaultFontSize + 4));
+                        new Rect(EditorPadding.Left, itemY, 1.5, Document.DefaultFontSize + 4));
                 continue;
             }
 
@@ -380,7 +423,7 @@ public class TodoListEditor : Control
                 foreach (var seg in wLine.Segments)
                 {
                     var el = item.Elements[seg.ElementIndex];
-                    double segX = PaddingLeft + seg.X;
+                    double segX = EditorPadding.Left + seg.X;
                     int segGlobalStart = item.GlobalOffset(seg.ElementIndex, seg.LocalStart);
 
                     if (el.Type == ContentElementType.Image && el.Image != null)
@@ -431,7 +474,7 @@ public class TodoListEditor : Control
             {
                 var (caretX, caretYOff, caretLineH) = CalculateCaretPosition(i, Caret.Offset);
                 context.FillRectangle(CaretBrush,
-                    new Rect(PaddingLeft + caretX, itemY + caretYOff, 1.5, caretLineH));
+                    new Rect(EditorPadding.Left + caretX, itemY + caretYOff, 1.5, caretLineH));
             }
         }
     }
@@ -626,8 +669,9 @@ public class TodoListEditor : Control
                 double imgH = Math.Min(el.ImageHeight, InlineImageMaxHeight);
                 double scale = imgH / el.ImageHeight;
                 double imgW = el.ImageWidth * scale + 2;
+                bool blockMode = ImageDisplay == ImageDisplayMode.Block;
 
-                if (lineX > 0 && lineX + imgW > availWidth)
+                if (lineX > 0 && (blockMode || lineX + imgW > availWidth))
                 {
                     currentLine.Height = lineH;
                     currentLine.EndGlobalOffset = globalOff;
@@ -646,6 +690,16 @@ public class TodoListEditor : Control
                 lineX += imgW;
                 lineH = Math.Max(lineH, imgH);
                 globalOff += 1;
+
+                if (blockMode)
+                {
+                    currentLine.Height = lineH;
+                    currentLine.EndGlobalOffset = globalOff;
+                    currentLine = new WrappedLine { StartGlobalOffset = globalOff };
+                    lines.Add(currentLine);
+                    lineX = 0;
+                    lineH = Document.DefaultFontSize + 4;
+                }
             }
             else if (el.Type == ContentElementType.Text && el.Text.Length > 0)
             {
@@ -770,7 +824,7 @@ public class TodoListEditor : Control
 
         var pos = e.GetPosition(this);
 
-        if (pos.X < PaddingLeft - 4)
+        if (pos.X < EditorPadding.Left - 4)
         {
             int itemIdx = HitTestItem(pos.Y);
             if (itemIdx >= 0 && itemIdx < Document.Items.Count)
@@ -832,7 +886,7 @@ public class TodoListEditor : Control
         itemIdx = Math.Clamp(itemIdx, 0, Document.Items.Count - 1);
 
         var item = Document.Items[itemIdx];
-        double relX = pos.X - PaddingLeft;
+        double relX = pos.X - EditorPadding.Left;
         if (relX < 0) return new CursorPosition(itemIdx, 0);
 
         if (itemIdx >= _itemWrapping.Count)
