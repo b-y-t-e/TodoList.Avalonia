@@ -8,10 +8,13 @@ A custom rich-text todo-list editor control for [Avalonia UI](https://avaloniaui
 
 - Checkbox todo items with strikethrough for completed items
 - Rich text editing with inline image support (markdown syntax: `![alt](key)`)
-- Multi-line text wrapping
+- Inline and block image display modes
+- Multi-line text wrapping with wrapped-line-aware Home/End navigation
+- Word navigation (Ctrl+Left/Right), word selection (Ctrl+Shift+Left/Right), word deletion (Ctrl+Backspace/Delete)
 - Full undo/redo with coalesced typing actions
 - Text selection via keyboard (Shift+arrows) and mouse (click-drag)
 - Clipboard integration — paste text and images (Ctrl+V)
+- Fully themeable — all colors and layout constants exposed as Avalonia `StyledProperty`
 - MVVM-ready — bind to `Items` property with `ObservableCollection<TodoItemData>`
 - Cross-platform via Avalonia (Windows, macOS, Linux)
 

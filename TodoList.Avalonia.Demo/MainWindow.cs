@@ -105,11 +105,29 @@ public class MainWindow : Window
             }
         };
 
+        var imageDisplayCombo = new ComboBox
+        {
+            Items = { "Inline", "Block" },
+            SelectedIndex = 0,
+            Margin = new Thickness(4),
+            Width = 100
+        };
+        imageDisplayCombo.SelectionChanged += (_, _) =>
+        {
+            if (imageDisplayCombo.SelectedItem is string mode)
+            {
+                _editor.ImageDisplay = mode == "Block"
+                    ? ImageDisplayMode.Block
+                    : ImageDisplayMode.Inline;
+                _editor.Focus();
+            }
+        };
+
         var toolbar = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Margin = new Thickness(4),
-            Children = { addButton, checkAllButton, uncheckAllButton, fontCombo, fontSizeCombo }
+            Children = { addButton, checkAllButton, uncheckAllButton, fontCombo, fontSizeCombo, imageDisplayCombo }
         };
 
         var scrollViewer = new ScrollViewer

@@ -406,7 +406,8 @@ public class TodoListEditor : Control
             var wrappedLines = _itemWrapping[i];
 
             double cbX = (EditorPadding.Left - CheckboxSize) / 2;
-            DrawCheckbox(context, cbX, itemY + 1, item.IsChecked);
+            double firstLineH = wrappedLines.Count > 0 ? wrappedLines[0].Height : (Document.DefaultFontSize + 4);
+            DrawCheckbox(context, cbX, itemY + firstLineH - CheckboxSize, item.IsChecked);
 
             if (item.Elements.Count == 0)
             {
@@ -426,14 +427,16 @@ public class TodoListEditor : Control
                     double segX = EditorPadding.Left + seg.X;
                     int segGlobalStart = item.GlobalOffset(seg.ElementIndex, seg.LocalStart);
 
+                    double segY = lineY + (wLine.Height - seg.Height);
+
                     if (el.Type == ContentElementType.Image && el.Image != null)
                     {
                         bool inSel = IsOffsetInSelection(i, segGlobalStart, selFirst, selLast);
                         if (inSel)
                             context.FillRectangle(selBrush,
-                                new Rect(segX, lineY, seg.Width - 2, seg.Height));
+                                new Rect(segX, segY, seg.Width - 2, seg.Height));
 
-                        context.DrawImage(el.Image, new Rect(segX, lineY, seg.Width - 2, seg.Height));
+                        context.DrawImage(el.Image, new Rect(segX, segY, seg.Width - 2, seg.Height));
                     }
                     else
                     {
@@ -450,7 +453,7 @@ public class TodoListEditor : Control
                             double sX = selStartInSeg > 0
                                 ? MeasureTextWidth(segText[..selStartInSeg], typeface, fs) : 0;
                             double sW = MeasureTextWidth(segText[selStartInSeg..selEndInSeg], typeface, fs);
-                            context.FillRectangle(selBrush, new Rect(segX + sX, lineY, sW, seg.Height));
+                            context.FillRectangle(selBrush, new Rect(segX + sX, segY, sW, seg.Height));
                         }
 
                         var fmt = new FormattedText(segText,
@@ -460,12 +463,12 @@ public class TodoListEditor : Control
 
                         if (item.IsChecked)
                         {
-                            double textY = lineY + fmt.Height / 2;
+                            double textY = segY + fmt.Height / 2;
                             context.DrawLine(new Pen(CheckedForeground, 1),
                                 new Point(segX, textY), new Point(segX + fmt.Width, textY));
                         }
 
-                        context.DrawText(fmt, new Point(segX, lineY));
+                        context.DrawText(fmt, new Point(segX, segY));
                     }
                 }
             }
@@ -510,8 +513,10 @@ public class TodoListEditor : Control
     private (double x, double yOffset, double lineHeight) CalculateCaretPosition(
         int itemIndex, int globalOffset)
     {
+        double textH = Document.DefaultFontSize + 4;
+
         if (itemIndex >= _itemWrapping.Count)
-            return (0, 0, Document.DefaultFontSize + 4);
+            return (0, 0, textH);
 
         var wrappedLines = _itemWrapping[itemIndex];
         var item = Document.Items[itemIndex];
@@ -546,17 +551,20 @@ public class TodoListEditor : Control
                                 el.Text[seg.LocalStart..(seg.LocalStart + localOff)], typeface, fs);
                         }
 
-                        return (x, wLine.YOffset, wLine.Height);
+                        double h = seg.Height;
+                        return (x, wLine.YOffset + (wLine.Height - h), h);
                     }
                 }
 
                 double endX = 0;
+                double endH = textH;
                 if (wLine.Segments.Count > 0)
                 {
                     var lastSeg = wLine.Segments[^1];
                     endX = lastSeg.X + lastSeg.Width;
+                    endH = lastSeg.Height;
                 }
-                return (endX, wLine.YOffset, wLine.Height);
+                return (endX, wLine.YOffset + (wLine.Height - endH), endH);
             }
         }
 
@@ -569,10 +577,36 @@ public class TodoListEditor : Control
                 var lastSeg = lastLine.Segments[^1];
                 x = lastSeg.X + lastSeg.Width;
             }
-            return (x, lastLine.YOffset, lastLine.Height);
+            double lastH = lastLine.Segments.Count > 0 ? lastLine.Segments[^1].Height : textH;
+            return (x, lastLine.YOffset + (lastLine.Height - lastH), lastH);
         }
 
-        return (0, 0, Document.DefaultFontSize + 4);
+        return (0, 0, textH);
+    }
+
+    private (int start, int end) GetCurrentWrappedLineRange(int itemIndex, int globalOffset)
+    {
+        if (itemIndex >= _itemWrapping.Count)
+            return (0, 0);
+
+        var wrappedLines = _itemWrapping[itemIndex];
+        for (int li = 0; li < wrappedLines.Count; li++)
+        {
+            var wLine = wrappedLines[li];
+            bool isLastLine = li == wrappedLines.Count - 1;
+            if (globalOffset < wLine.EndGlobalOffset
+                || (isLastLine && globalOffset <= wLine.EndGlobalOffset))
+            {
+                return (wLine.StartGlobalOffset, wLine.EndGlobalOffset);
+            }
+        }
+
+        if (wrappedLines.Count > 0)
+        {
+            var last = wrappedLines[^1];
+            return (last.StartGlobalOffset, last.EndGlobalOffset);
+        }
+        return (0, 0);
     }
 
     private int HitTestLineOffset(TodoItem item, WrappedLine wLine, double targetX)
@@ -646,7 +680,7 @@ public class TodoListEditor : Control
         var fmt = new FormattedText(text,
             System.Globalization.CultureInfo.CurrentCulture,
             FlowDirection.LeftToRight, typeface, fontSize, Foreground);
-        return fmt.Width;
+        return fmt.WidthIncludingTrailingWhitespace;
     }
 
     // ---- Wrapping ----
@@ -1016,7 +1050,8 @@ public class TodoListEditor : Control
                 break;
 
             case Key.Home:
-                var home = new CursorPosition(Caret.ItemIndex, 0);
+                var (lineStart, _) = GetCurrentWrappedLineRange(Caret.ItemIndex, Caret.Offset);
+                var home = new CursorPosition(Caret.ItemIndex, lineStart);
                 if (!shift) SelectionAnchor = home;
                 Caret = home;
                 InvalidateMeasure();
@@ -1033,7 +1068,8 @@ public class TodoListEditor : Control
                 break;
 
             case Key.End:
-                var end = new CursorPosition(Caret.ItemIndex, CurrentItem.TextLength);
+                var (_, lineEnd) = GetCurrentWrappedLineRange(Caret.ItemIndex, Caret.Offset);
+                var end = new CursorPosition(Caret.ItemIndex, lineEnd);
                 if (!shift) SelectionAnchor = end;
                 Caret = end;
                 InvalidateMeasure();
