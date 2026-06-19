@@ -628,12 +628,8 @@ public class TodoListEditor : Control
                 }
 
                 split = true;
-                for (int j = item.Elements.Count - 1; j > i; j--)
-                {
-                    newItem.Elements.Insert(split ? newItem.Elements.Count == 0 ? 0 : newItem.Elements.Count : 0,
-                        item.Elements[j]);
-                }
-                // Remove transferred elements from original
+                for (int j = i + 1; j < item.Elements.Count; j++)
+                    newItem.Elements.Add(item.Elements[j]);
                 for (int j = item.Elements.Count - 1; j > i; j--)
                     item.Elements.RemoveAt(j);
 

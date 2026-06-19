@@ -114,7 +114,7 @@ public class TodoItem
             bool isLast = i == Elements.Count - 1;
             if (Elements[i].Type == ContentElementType.Text)
             {
-                if (globalOffset <= pos + elLen)
+                if (globalOffset < pos + elLen || (isLast && globalOffset <= pos + elLen))
                     return (i, globalOffset - pos);
             }
             else
