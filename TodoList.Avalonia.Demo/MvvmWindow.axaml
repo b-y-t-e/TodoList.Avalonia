@@ -1,0 +1,71 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:todo="clr-namespace:TodoList.Avalonia.Controls;assembly=TodoList.Avalonia"
+        xmlns:model="clr-namespace:TodoList.Avalonia.Model;assembly=TodoList.Avalonia"
+        xmlns:local="clr-namespace:TodoList.Avalonia.Demo"
+        x:Class="TodoList.Avalonia.Demo.MvvmWindow"
+        x:DataType="local:TodoViewModel"
+        Title="TodoList Editor — MVVM Demo"
+        Width="900" Height="600"
+        WindowStartupLocation="CenterScreen">
+
+  <Window.DataContext>
+    <local:TodoViewModel />
+  </Window.DataContext>
+
+  <DockPanel>
+    <!-- Status bar -->
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal">
+      <TextBlock Margin="8,4" FontSize="12" Foreground="Gray"
+                 Text="{Binding StatusText}" />
+    </StackPanel>
+
+    <!-- Main split: editor + VM items panel -->
+    <Grid ColumnDefinitions="*, Auto, 250">
+
+      <!-- Left: toolbar + editor -->
+      <DockPanel Grid.Column="0">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4">
+          <Button Content="+ Add item" Margin="4" Command="{Binding AddItemCommand}" />
+          <Button Content="Check all" Margin="4" Command="{Binding CheckAllCommand}" />
+          <Button Content="Uncheck all" Margin="4" Command="{Binding UncheckAllCommand}" />
+          <Button Content="Remove checked" Margin="4" Command="{Binding RemoveCheckedCommand}" />
+        </StackPanel>
+
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+          <todo:TodoListEditor DefaultFontSize="15"
+                               Items="{Binding Items}"
+                               Images="{Binding Images}">
+            <todo:TodoListEditor.DefaultFont>
+              <FontFamily>Segoe UI</FontFamily>
+            </todo:TodoListEditor.DefaultFont>
+          </todo:TodoListEditor>
+        </ScrollViewer>
+      </DockPanel>
+
+      <!-- Splitter -->
+      <GridSplitter Grid.Column="1" Width="4" Background="LightGray" />
+
+      <!-- Right: ViewModel items list -->
+      <DockPanel Grid.Column="2">
+        <TextBlock DockPanel.Dock="Top" Text="ViewModel Items"
+                   FontWeight="Bold" Margin="8,4" FontSize="13" />
+        <ListBox ItemsSource="{Binding Items}" FontSize="12">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="model:TodoItemData">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <CheckBox IsChecked="{Binding IsChecked}" />
+                <TextBlock VerticalAlignment="Center" MaxWidth="180"
+                           TextTrimming="CharacterEllipsis"
+                           Text="{Binding Text}" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+
+    </Grid>
+  </DockPanel>
+
+</Window>

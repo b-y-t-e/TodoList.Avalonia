@@ -1,9 +1,12 @@
-using System;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using global::Avalonia;
+using global::Avalonia.Media;
+using global::Avalonia.Media.Imaging;
+using global::Avalonia.Platform;
 using TodoList.Avalonia.Model;
 
 namespace TodoList.Avalonia.Demo;
@@ -11,80 +14,51 @@ namespace TodoList.Avalonia.Demo;
 public class TodoViewModel : INotifyPropertyChanged
 {
     public ObservableCollection<TodoItemData> Items { get; } = new();
+    public ObservableCollection<TodoImageEntry> Images { get; } = new();
 
     public ICommand AddItemCommand { get; }
     public ICommand CheckAllCommand { get; }
     public ICommand UncheckAllCommand { get; }
     public ICommand RemoveCheckedCommand { get; }
 
-    private string _statusText = "MVVM Demo — edit the list, changes sync with ViewModel.";
+    private string _statusText = string.Empty;
     public string StatusText
     {
         get => _statusText;
-        set
-        {
-            if (_statusText != value)
-            {
-                _statusText = value;
-                OnPropertyChanged();
-            }
-        }
-    }
-
-    private int _itemCount;
-    public int ItemCount
-    {
-        get => _itemCount;
-        private set
-        {
-            if (_itemCount != value)
-            {
-                _itemCount = value;
-                OnPropertyChanged();
-            }
-        }
-    }
-
-    private int _checkedCount;
-    public int CheckedCount
-    {
-        get => _checkedCount;
-        private set
-        {
-            if (_checkedCount != value)
-            {
-                _checkedCount = value;
-                OnPropertyChanged();
-            }
-        }
+        set { if (_statusText != value) { _statusText = value; OnPropertyChanged(); } }
     }
 
     public TodoViewModel()
     {
         AddItemCommand = new RelayCommand(() =>
-        {
-            Items.Add(new TodoItemData($"New item #{Items.Count + 1}"));
-            UpdateCounts();
-        });
+            Items.Add(new TodoItemData($"New item #{Items.Count + 1}")));
 
         CheckAllCommand = new RelayCommand(() =>
         {
             foreach (var item in Items) item.IsChecked = true;
-            UpdateCounts();
         });
 
         UncheckAllCommand = new RelayCommand(() =>
         {
             foreach (var item in Items) item.IsChecked = false;
-            UpdateCounts();
         });
 
         RemoveCheckedCommand = new RelayCommand(() =>
         {
             for (int i = Items.Count - 1; i >= 0; i--)
                 if (Items[i].IsChecked) Items.RemoveAt(i);
-            UpdateCounts();
         });
+
+        Items.CollectionChanged += OnItemsCollectionChanged;
+
+        LoadSampleData();
+        UpdateStatus();
+    }
+
+    private void LoadSampleData()
+    {
+        Images.Add(new TodoImageEntry("star", CreateSolidBitmap(Colors.Gold)));
+        Images.Add(new TodoImageEntry("check", CreateSolidBitmap(Colors.LimeGreen)));
 
         Items.Add(new TodoItemData("Buy milk"));
         Items.Add(new TodoItemData("Walk the dog", true));
@@ -92,17 +66,32 @@ public class TodoViewModel : INotifyPropertyChanged
         Items.Add(new TodoItemData("MVVM binding example"));
         Items.Add(new TodoItemData("Images in text: ![star](star) great ![ok](check) done"));
         Items.Add(new TodoItemData("Paste text here (Ctrl+V)"));
-
-        Items.CollectionChanged += OnCollectionChanged;
-        foreach (var item in Items)
-            item.PropertyChanged += OnItemPropertyChanged;
-
-        UpdateCounts();
     }
 
-    private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e) => UpdateCounts();
+    private static WriteableBitmap CreateSolidBitmap(Color color)
+    {
+        const int size = 32;
+        var bmp = new WriteableBitmap(
+            new PixelSize(size, size),
+            new Vector(96, 96),
+            PixelFormat.Bgra8888,
+            AlphaFormat.Premul);
 
-    private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        using var buf = bmp.Lock();
+        var pixels = new byte[size * size * 4];
+        for (int i = 0; i < size * size; i++)
+        {
+            pixels[i * 4 + 0] = color.B;
+            pixels[i * 4 + 1] = color.G;
+            pixels[i * 4 + 2] = color.R;
+            pixels[i * 4 + 3] = 255;
+        }
+        System.Runtime.InteropServices.Marshal.Copy(pixels, 0, buf.Address, pixels.Length);
+
+        return bmp;
+    }
+
+    private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (e.OldItems != null)
             foreach (TodoItemData item in e.OldItems)
@@ -110,30 +99,21 @@ public class TodoViewModel : INotifyPropertyChanged
         if (e.NewItems != null)
             foreach (TodoItemData item in e.NewItems)
                 item.PropertyChanged += OnItemPropertyChanged;
-        UpdateCounts();
+        UpdateStatus();
     }
 
-    private void UpdateCounts()
+    private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e) => UpdateStatus();
+
+    private void UpdateStatus()
     {
-        ItemCount = Items.Count;
-        int c = 0;
+        int checkedCount = 0;
         foreach (var item in Items)
-            if (item.IsChecked) c++;
-        CheckedCount = c;
+            if (item.IsChecked) checkedCount++;
+        StatusText = $"Items: {Items.Count}, checked: {checkedCount}";
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
     protected void OnPropertyChanged([CallerMemberName] string? name = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-}
-
-public class RelayCommand : ICommand
-{
-    private readonly Action _execute;
-    public RelayCommand(Action execute) => _execute = execute;
-#pragma warning disable CS0067
-    public event EventHandler? CanExecuteChanged;
-#pragma warning restore CS0067
-    public bool CanExecute(object? parameter) => true;
-    public void Execute(object? parameter) => _execute();
 }
