@@ -7,7 +7,7 @@
 
     <!-- NuGet package metadata -->
     <PackageId>TodoList.Avalonia</PackageId>
-    <Version>0.1.3</Version>
+    <Version>0.2.0</Version>
     <Title>TodoList.Avalonia</Title>
     <Authors>b-y-t-e</Authors>
     <Description>A custom rich-text todo-list editor control for Avalonia UI. Features checkbox items, inline images, undo/redo, text selection, clipboard support, and MVVM binding.</Description>
