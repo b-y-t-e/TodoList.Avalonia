@@ -111,7 +111,7 @@ public class MainWindow : Window
         var imageDisplayCombo = new ComboBox
         {
             Items = { "Inline", "Block" },
-            SelectedIndex = 0,
+            SelectedIndex = 1,
             Margin = new Thickness(4),
             Width = 100
         };

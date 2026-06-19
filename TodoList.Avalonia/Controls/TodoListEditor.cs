@@ -41,7 +41,7 @@ public class TodoListEditor : Control
 
     public static readonly StyledProperty<ImageDisplayMode> ImageDisplayProperty =
         AvaloniaProperty.Register<TodoListEditor, ImageDisplayMode>(
-            nameof(ImageDisplay), ImageDisplayMode.Inline);
+            nameof(ImageDisplay), ImageDisplayMode.Block);
 
     public static readonly StyledProperty<IBrush> BackgroundBrushProperty =
         AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(BackgroundBrush), Brushes.White);
