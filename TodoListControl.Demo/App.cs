@@ -1,3 +1,4 @@
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -16,7 +17,8 @@ public class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow();
+            bool mvvm = desktop.Args?.Contains("--mvvm") == true;
+            desktop.MainWindow = mvvm ? new MvvmWindow() : new MainWindow();
         }
 
         base.OnFrameworkInitializationCompleted();
