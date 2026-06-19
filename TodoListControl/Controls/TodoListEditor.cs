@@ -190,19 +190,17 @@ public class TodoListEditor : Control
                         var typeface = BuildTypeface(el);
                         double fs = el.FontSize > 0 ? el.FontSize : Document.DefaultFontSize;
 
-                        for (int ci = 0; ci < el.Text.Length; ci++)
+                        int selStartInEl = Math.Max(0, (i == selFirst.ItemIndex ? selFirst.Offset : 0) - globalOff);
+                        int selEndInEl = Math.Min(el.Text.Length, (i == selLast.ItemIndex ? selLast.Offset : int.MaxValue) - globalOff);
+                        if (!CurrentSelection.IsEmpty && selStartInEl < selEndInEl
+                            && i >= selFirst.ItemIndex && i <= selLast.ItemIndex)
                         {
-                            bool inSel = IsOffsetInSelection(i, globalOff + ci, selFirst, selLast);
-                            if (inSel)
-                            {
-                                var charFmt = new FormattedText(
-                                    el.Text[ci].ToString(),
-                                    System.Globalization.CultureInfo.CurrentCulture,
-                                    FlowDirection.LeftToRight, typeface, fs, Brushes.Black);
-                                context.FillRectangle(new SolidColorBrush(Color.FromArgb(80, 30, 144, 255)),
-                                    new Rect(x + MeasureTextWidth(el.Text[..ci], typeface, fs),
-                                        y, charFmt.Width, charFmt.Height));
-                            }
+                            double selX = selStartInEl > 0
+                                ? MeasureTextWidth(el.Text[..selStartInEl], typeface, fs) : 0;
+                            double selW = MeasureTextWidth(el.Text[selStartInEl..selEndInEl], typeface, fs);
+                            var selBrush = new SolidColorBrush(Color.FromArgb(80, 30, 144, 255));
+                            double selH = fs + 4;
+                            context.FillRectangle(selBrush, new Rect(x + selX, y, selW, selH));
                         }
 
                         var fmt = new FormattedText(
