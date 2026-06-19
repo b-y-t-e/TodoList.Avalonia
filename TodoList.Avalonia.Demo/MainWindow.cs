@@ -1,7 +1,10 @@
+using System;
 using global::Avalonia;
 using global::Avalonia.Controls;
 using global::Avalonia.Layout;
 using global::Avalonia.Media;
+using global::Avalonia.Media.Imaging;
+using global::Avalonia.Platform;
 using TodoList.Avalonia.Controls;
 using TodoList.Avalonia.Model;
 
@@ -146,12 +149,21 @@ public class MainWindow : Window
 
         Content = mainPanel;
 
+        var dogBitmap = new Bitmap(AssetLoader.Open(new Uri("avares://TodoList.Avalonia.Demo/Assets/dog.png")));
+        _editor.ImageStore["dog"] = dogBitmap;
+
         _editor.Document.Items.Clear();
-        _editor.Document.Items.Add(new TodoItem("Buy milk"));
-        _editor.Document.Items.Add(new TodoItem("Walk the dog", true));
-        _editor.Document.Items.Add(new TodoItem("Code review PR #42"));
-        _editor.Document.Items.Add(new TodoItem("Paste multiline text here (Ctrl+V)"));
-        _editor.Document.Items.Add(new TodoItem("Paste an image here (Ctrl+V)"));
+        _editor.Document.Items.Add(_editor.ParseTextToItem("Morning walk in the park ![dog](dog)"));
+        var breakfast = _editor.ParseTextToItem("Breakfast — kibble + a spoon of wet food");
+        breakfast.IsChecked = true;
+        _editor.Document.Items.Add(breakfast);
+        _editor.Document.Items.Add(_editor.ParseTextToItem("Practice 'sit' and 'shake' commands"));
+        _editor.Document.Items.Add(_editor.ParseTextToItem("Vet appointment at 2pm — annual checkup"));
+        _editor.Document.Items.Add(_editor.ParseTextToItem("Evening zoomies session in the yard"));
+        _editor.Document.Items.Add(_editor.ParseTextToItem("Brush that shiny black coat ![dog](dog)"));
+        var bellyRubs = _editor.ParseTextToItem("Belly rubs before bedtime");
+        bellyRubs.IsChecked = true;
+        _editor.Document.Items.Add(bellyRubs);
         _editor.InvalidateVisual();
     }
 }
