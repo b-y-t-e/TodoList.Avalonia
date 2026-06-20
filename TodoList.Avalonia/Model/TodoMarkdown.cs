@@ -7,7 +7,7 @@ namespace TodoList.Avalonia.Model;
 public static class TodoMarkdown
 {
     private static readonly Regex CheckboxPattern =
-        new(@"^- \[([ xX])\] (.*)", RegexOptions.Compiled);
+        new(@"^(?:-\s+)?\[([ xX])\]\s?(.*)", RegexOptions.Compiled);
 
     public static List<TodoItemData> ParseMarkdown(string? markdown)
     {

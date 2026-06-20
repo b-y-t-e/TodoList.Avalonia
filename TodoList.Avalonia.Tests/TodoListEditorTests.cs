@@ -1599,6 +1599,223 @@ public class TodoListEditorTests
 #pragma warning restore CS0618
     }
 
+    // ---- ParseMarkdown: formats without "- " prefix ----
+
+    [Test]
+    public void ParseMarkdown_WithoutDashPrefix()
+    {
+        var items = TodoMarkdown.ParseMarkdown("[x] Done\n[ ] Not done");
+        Assert.That(items.Count, Is.EqualTo(2));
+        Assert.That(items[0].Text, Is.EqualTo("Done"));
+        Assert.That(items[0].IsChecked, Is.True);
+        Assert.That(items[1].Text, Is.EqualTo("Not done"));
+        Assert.That(items[1].IsChecked, Is.False);
+    }
+
+    [Test]
+    public void ParseMarkdown_WithoutDashCapitalX()
+    {
+        var items = TodoMarkdown.ParseMarkdown("[X] Task");
+        Assert.That(items.Count, Is.EqualTo(1));
+        Assert.That(items[0].IsChecked, Is.True);
+        Assert.That(items[0].Text, Is.EqualTo("Task"));
+    }
+
+    [Test]
+    public void ParseMarkdown_MixedFormats()
+    {
+        var items = TodoMarkdown.ParseMarkdown("- [x] With dash\n[x] Without dash\n- [ ] Unchecked dash\n[ ] Unchecked no dash");
+        Assert.That(items.Count, Is.EqualTo(4));
+        Assert.That(items[0].Text, Is.EqualTo("With dash"));
+        Assert.That(items[0].IsChecked, Is.True);
+        Assert.That(items[1].Text, Is.EqualTo("Without dash"));
+        Assert.That(items[1].IsChecked, Is.True);
+        Assert.That(items[2].Text, Is.EqualTo("Unchecked dash"));
+        Assert.That(items[2].IsChecked, Is.False);
+        Assert.That(items[3].Text, Is.EqualTo("Unchecked no dash"));
+        Assert.That(items[3].IsChecked, Is.False);
+    }
+
+    [Test]
+    public void ParseMarkdown_WithoutDashNoSpaceAfterBracket()
+    {
+        var items = TodoMarkdown.ParseMarkdown("[x]Task without space");
+        Assert.That(items.Count, Is.EqualTo(1));
+        Assert.That(items[0].IsChecked, Is.True);
+        Assert.That(items[0].Text, Is.EqualTo("Task without space"));
+    }
+
+    // ---- MarkdownText property tests ----
+
+    [AvaloniaTest]
+    public void MarkdownText_SetPopulatesItems()
+    {
+        var editor = new TodoListEditor();
+        editor.MarkdownText = "- [x] Done\n- [ ] Todo";
+
+        Assert.That(editor.Items, Is.Not.Null);
+        Assert.That(editor.Items!.Count, Is.EqualTo(2));
+        Assert.That(editor.Items[0].Text, Is.EqualTo("Done"));
+        Assert.That(editor.Items[0].IsChecked, Is.True);
+        Assert.That(editor.Items[1].Text, Is.EqualTo("Todo"));
+        Assert.That(editor.Items[1].IsChecked, Is.False);
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_SetWithNoDashFormat()
+    {
+        var editor = new TodoListEditor();
+        editor.MarkdownText = "[x] Done\n[ ] Todo";
+
+        Assert.That(editor.Items!.Count, Is.EqualTo(2));
+        Assert.That(editor.Items[0].IsChecked, Is.True);
+        Assert.That(editor.Items[1].IsChecked, Is.False);
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_SyncsBackAfterEdit()
+    {
+        var editor = new TodoListEditor();
+        editor.Items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("Buy milk", false),
+            new TodoItemData("Walk dog", true)
+        };
+        editor.InsertTextAtCaret("extra");
+
+        Assert.That(editor.MarkdownText, Does.Contain("- [ ] extraBuy milk"));
+        Assert.That(editor.MarkdownText, Does.Contain("- [x] Walk dog"));
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_SyncsWhenItemsSetDirectly()
+    {
+        var editor = new TodoListEditor();
+        editor.Items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("Alpha", true),
+            new TodoItemData("Beta", false)
+        };
+
+        Assert.That(editor.MarkdownText, Is.Not.Null);
+        Assert.That(editor.MarkdownText, Does.Contain("- [x] Alpha"));
+        Assert.That(editor.MarkdownText, Does.Contain("- [ ] Beta"));
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_SetNullClearsItems()
+    {
+        var editor = new TodoListEditor();
+        editor.MarkdownText = "- [x] Something";
+        Assert.That(editor.Items!.Count, Is.EqualTo(1));
+
+        editor.MarkdownText = null;
+        Assert.That(editor.Items!.Count, Is.EqualTo(0));
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_SetEmptyClearsItems()
+    {
+        var editor = new TodoListEditor();
+        editor.MarkdownText = "- [x] Something";
+        editor.MarkdownText = "";
+        Assert.That(editor.Items!.Count, Is.EqualTo(0));
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_SyncsOnCollectionAdd()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("First", false)
+        };
+        editor.Items = items;
+
+        items.Add(new TodoItemData("Second", true));
+
+        Assert.That(editor.MarkdownText, Does.Contain("- [ ] First"));
+        Assert.That(editor.MarkdownText, Does.Contain("- [x] Second"));
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_SyncsOnCollectionRemove()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("First", false),
+            new TodoItemData("Second", true)
+        };
+        editor.Items = items;
+
+        items.RemoveAt(0);
+
+        Assert.That(editor.MarkdownText, Is.EqualTo("- [x] Second"));
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_SyncsOnItemPropertyChange()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("Task", false)
+        };
+        editor.Items = items;
+
+        items[0].IsChecked = true;
+
+        Assert.That(editor.MarkdownText, Is.EqualTo("- [x] Task"));
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_NoDashFormatPreservedUntilNextSync()
+    {
+        var editor = new TodoListEditor();
+        editor.MarkdownText = "[x] Done\n[ ] Todo";
+
+        // Getter returns original value (no extra sync cycle)
+        Assert.That(editor.MarkdownText, Is.EqualTo("[x] Done\n[ ] Todo"));
+
+        // After an edit, MarkdownText normalizes to canonical dash format
+        editor.Items![0].IsChecked = false;
+        Assert.That(editor.MarkdownText, Is.EqualTo("- [ ] Done\n- [ ] Todo"));
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_RoundtripPreservesDashFormat()
+    {
+        var editor = new TodoListEditor();
+        editor.MarkdownText = "- [x] Done\n- [ ] Todo";
+
+        Assert.That(editor.MarkdownText, Is.EqualTo("- [x] Done\n- [ ] Todo"));
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_SyncsOnItemTextChange()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("Original", false)
+        };
+        editor.Items = items;
+
+        items[0].Text = "Modified";
+
+        Assert.That(editor.MarkdownText, Is.EqualTo("- [ ] Modified"));
+    }
+
+    [Test]
+    public void ParseMarkdown_DashFormatNoSpaceAfterBracket()
+    {
+        var items = TodoMarkdown.ParseMarkdown("- [x]Task no space");
+        Assert.That(items.Count, Is.EqualTo(1));
+        Assert.That(items[0].IsChecked, Is.True);
+        Assert.That(items[0].Text, Is.EqualTo("Task no space"));
+    }
+
     private static Bitmap CreateTestBitmap()
     {
         return new WriteableBitmap(

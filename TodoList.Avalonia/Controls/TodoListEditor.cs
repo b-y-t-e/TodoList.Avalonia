@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.IO;
@@ -8,6 +9,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using global::Avalonia;
 using global::Avalonia.Controls;
+using global::Avalonia.Data;
 using global::Avalonia.Controls.Primitives;
 using global::Avalonia.Input;
 using global::Avalonia.Layout;
@@ -94,6 +96,10 @@ public class TodoListEditor : Control
 
     public static readonly StyledProperty<string?> DefaultFontNameProperty =
         AvaloniaProperty.Register<TodoListEditor, string?>(nameof(DefaultFontName));
+
+    public static readonly StyledProperty<string?> MarkdownTextProperty =
+        AvaloniaProperty.Register<TodoListEditor, string?>(nameof(MarkdownText),
+            defaultBindingMode: BindingMode.TwoWay);
 
     public EditorTheme ColorTheme
     {
@@ -230,6 +236,12 @@ public class TodoListEditor : Control
         set => SetValue(DefaultFontNameProperty, value);
     }
 
+    public string? MarkdownText
+    {
+        get => GetValue(MarkdownTextProperty);
+        set => SetValue(MarkdownTextProperty, value);
+    }
+
     private readonly Dictionary<string, Bitmap> _legacyImageStore = new();
 
     [Obsolete("Use the Images StyledProperty instead.")]
@@ -262,6 +274,15 @@ public class TodoListEditor : Control
     private long _changeGeneration;
     private long _cleanGeneration;
     private bool _syncingFontProperties;
+    private bool _syncingMarkdownText;
+
+    private void SyncMarkdownTextFromItems()
+    {
+        if (_syncingMarkdownText) return;
+        _syncingMarkdownText = true;
+        try { MarkdownText = TodoMarkdown.ToMarkdown(Items); }
+        finally { _syncingMarkdownText = false; }
+    }
 
     private SyncGuard SuppressSync() => new(this);
 
@@ -406,6 +427,16 @@ public class TodoListEditor : Control
             OnImagesPropertyChanged(
                 change.OldValue as IEnumerable<TodoImageEntry>,
                 change.NewValue as IEnumerable<TodoImageEntry>);
+        }
+        else if (change.Property == MarkdownTextProperty && !_syncingMarkdownText)
+        {
+            _syncingMarkdownText = true;
+            try
+            {
+                var parsed = TodoMarkdown.ParseMarkdown(change.NewValue as string);
+                Items = new ObservableCollection<TodoItemData>(parsed);
+            }
+            finally { _syncingMarkdownText = false; }
         }
     }
 
@@ -2098,6 +2129,7 @@ public class TodoListEditor : Control
                 item.PropertyChanged += OnItemDataPropertyChanged;
 
         ResetDocumentFromItems();
+        SyncMarkdownTextFromItems();
     }
 
     private void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -2117,6 +2149,7 @@ public class TodoListEditor : Control
     private void ApplyItemsCollectionChange()
     {
         LoadDocumentFromItems(isFullLoad: false);
+        SyncMarkdownTextFromItems();
     }
 
     private void OnItemDataPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -2150,6 +2183,7 @@ public class TodoListEditor : Control
         _changeGeneration++;
         UpdateDirtyState();
         InvalidateMeasure();
+        SyncMarkdownTextFromItems();
     }
 
     private void ResetDocumentFromItems()
@@ -2230,6 +2264,7 @@ public class TodoListEditor : Control
                 items.RemoveAt(items.Count - 1);
             }
         }
+        SyncMarkdownTextFromItems();
         ItemsChanged?.Invoke(this, EventArgs.Empty);
         ItemsDetailChanged?.Invoke(this, new TodoItemsChangedEventArgs(kind));
     }
