@@ -1582,6 +1582,48 @@ public class TodoListEditorTests
         Assert.That(items[2].Text, Is.EqualTo("- [] empty"));
     }
 
+    [Test]
+    public void ParseMarkdown_AsteriskListMarker()
+    {
+        var items = TodoMarkdown.ParseMarkdown("* [x] Done\n* [ ] Todo");
+        Assert.That(items.Count, Is.EqualTo(2));
+        Assert.That(items[0].IsChecked, Is.True);
+        Assert.That(items[0].Text, Is.EqualTo("Done"));
+        Assert.That(items[1].IsChecked, Is.False);
+        Assert.That(items[1].Text, Is.EqualTo("Todo"));
+    }
+
+    [Test]
+    public void ParseMarkdown_PlusListMarker()
+    {
+        var items = TodoMarkdown.ParseMarkdown("+ [x] Done\n+ [ ] Todo");
+        Assert.That(items.Count, Is.EqualTo(2));
+        Assert.That(items[0].IsChecked, Is.True);
+        Assert.That(items[1].IsChecked, Is.False);
+    }
+
+    [Test]
+    public void ParseMarkdown_LeadingWhitespace()
+    {
+        var items = TodoMarkdown.ParseMarkdown("  - [x] Indented\n    - [ ] Nested");
+        Assert.That(items.Count, Is.EqualTo(2));
+        Assert.That(items[0].IsChecked, Is.True);
+        Assert.That(items[0].Text, Is.EqualTo("Indented"));
+        Assert.That(items[1].IsChecked, Is.False);
+        Assert.That(items[1].Text, Is.EqualTo("Nested"));
+    }
+
+    [Test]
+    public void ParseMarkdown_MixedMarkers()
+    {
+        var items = TodoMarkdown.ParseMarkdown("- [x] Dash\n* [X] Star\n+ [ ] Plus\n[x] Bare");
+        Assert.That(items.Count, Is.EqualTo(4));
+        Assert.That(items[0].Text, Is.EqualTo("Dash"));
+        Assert.That(items[1].Text, Is.EqualTo("Star"));
+        Assert.That(items[2].Text, Is.EqualTo("Plus"));
+        Assert.That(items[3].Text, Is.EqualTo("Bare"));
+    }
+
     [AvaloniaTest]
     public void ImagePastedKeyOverrideUpdatesLegacyImageStore()
     {
@@ -1814,6 +1856,283 @@ public class TodoListEditorTests
         Assert.That(items.Count, Is.EqualTo(1));
         Assert.That(items[0].IsChecked, Is.True);
         Assert.That(items[0].Text, Is.EqualTo("Task no space"));
+    }
+
+    // ---- MoveCheckedToEnd tests ----
+
+    [AvaloniaTest]
+    public void MoveCheckedToEnd_WhenFalse_ItemStaysInPlace()
+    {
+        var editor = new TodoListEditor();
+        editor.MoveCheckedToEnd = false;
+        editor.Items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("A", false),
+            new TodoItemData("B", false),
+            new TodoItemData("C", false)
+        };
+
+        editor.ToggleItem(0);
+
+        Assert.That(editor.Items[0].Text, Is.EqualTo("A"));
+        Assert.That(editor.Items[0].IsChecked, Is.True);
+        Assert.That(editor.Items[1].Text, Is.EqualTo("B"));
+        Assert.That(editor.Items[2].Text, Is.EqualTo("C"));
+    }
+
+    [AvaloniaTest]
+    public void MoveCheckedToEnd_WhenTrue_CheckedItemMovesToEnd()
+    {
+        var editor = new TodoListEditor();
+        editor.MoveCheckedToEnd = true;
+        editor.Items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("A", false),
+            new TodoItemData("B", false),
+            new TodoItemData("C", false)
+        };
+
+        editor.ToggleItem(0);
+
+        Assert.That(editor.Items[0].Text, Is.EqualTo("B"));
+        Assert.That(editor.Items[1].Text, Is.EqualTo("C"));
+        Assert.That(editor.Items[2].Text, Is.EqualTo("A"));
+        Assert.That(editor.Items[2].IsChecked, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void MoveCheckedToEnd_MovesBeforeExistingChecked()
+    {
+        var editor = new TodoListEditor();
+        editor.MoveCheckedToEnd = true;
+        editor.Items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("A", false),
+            new TodoItemData("B", false),
+            new TodoItemData("C", true)
+        };
+
+        editor.ToggleItem(0);
+
+        Assert.That(editor.Items[0].Text, Is.EqualTo("B"));
+        Assert.That(editor.Items[1].Text, Is.EqualTo("A"));
+        Assert.That(editor.Items[1].IsChecked, Is.True);
+        Assert.That(editor.Items[2].Text, Is.EqualTo("C"));
+    }
+
+    [AvaloniaTest]
+    public void MoveCheckedToEnd_LastItemDoesNotMove()
+    {
+        var editor = new TodoListEditor();
+        editor.MoveCheckedToEnd = true;
+        editor.Items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("A", false),
+            new TodoItemData("B", false)
+        };
+
+        editor.ToggleItem(1);
+
+        Assert.That(editor.Items[0].Text, Is.EqualTo("A"));
+        Assert.That(editor.Items[1].Text, Is.EqualTo("B"));
+        Assert.That(editor.Items[1].IsChecked, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void MoveCheckedToEnd_UncheckedMovesBeforeChecked()
+    {
+        var editor = new TodoListEditor();
+        editor.MoveCheckedToEnd = true;
+        editor.Items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("A", false),
+            new TodoItemData("B", true),
+            new TodoItemData("C", true)
+        };
+
+        // Uncheck B (index 1) → moves before checked section
+        editor.ToggleItem(1);
+
+        Assert.That(editor.Items[0].Text, Is.EqualTo("A"));
+        Assert.That(editor.Items[1].Text, Is.EqualTo("B"));
+        Assert.That(editor.Items[1].IsChecked, Is.False);
+        Assert.That(editor.Items[2].Text, Is.EqualTo("C"));
+        Assert.That(editor.Items[2].IsChecked, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void MoveCheckedToEnd_InitialSortOnLoad()
+    {
+        var editor = new TodoListEditor();
+        editor.MoveCheckedToEnd = true;
+        editor.Items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("A", true),
+            new TodoItemData("B", false),
+            new TodoItemData("C", true),
+            new TodoItemData("D", false)
+        };
+
+        Assert.That(editor.Items[0].Text, Is.EqualTo("B"));
+        Assert.That(editor.Items[1].Text, Is.EqualTo("D"));
+        Assert.That(editor.Items[2].Text, Is.EqualTo("A"));
+        Assert.That(editor.Items[3].Text, Is.EqualTo("C"));
+    }
+
+    [AvaloniaTest]
+    public void MoveCheckedToEnd_SortsWhenPropertyEnabled()
+    {
+        var editor = new TodoListEditor();
+        editor.Items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("A", true),
+            new TodoItemData("B", false)
+        };
+
+        Assert.That(editor.Items[0].Text, Is.EqualTo("A"));
+
+        editor.MoveCheckedToEnd = true;
+
+        Assert.That(editor.Items[0].Text, Is.EqualTo("B"));
+        Assert.That(editor.Items[1].Text, Is.EqualTo("A"));
+    }
+
+    [AvaloniaTest]
+    public void MoveCheckedToEnd_UncheckLastCheckedStaysInPlace()
+    {
+        var editor = new TodoListEditor();
+        editor.MoveCheckedToEnd = true;
+        editor.Items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("A", false),
+            new TodoItemData("B", true)
+        };
+
+        editor.ToggleItem(1);
+
+        Assert.That(editor.Items[0].Text, Is.EqualTo("A"));
+        Assert.That(editor.Items[1].Text, Is.EqualTo("B"));
+        Assert.That(editor.Items[1].IsChecked, Is.False);
+    }
+
+    [AvaloniaTest]
+    public void MoveCheckedToEnd_UncheckMiddleMovesToCorrectPosition()
+    {
+        var editor = new TodoListEditor();
+        editor.MoveCheckedToEnd = true;
+        editor.Items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("A", false),
+            new TodoItemData("B", true),
+            new TodoItemData("C", true),
+            new TodoItemData("D", true)
+        };
+
+        // Uncheck C (index 2) → should move before checked section (to index 1)
+        editor.ToggleItem(2);
+
+        Assert.That(editor.Items[0].Text, Is.EqualTo("A"));
+        Assert.That(editor.Items[1].Text, Is.EqualTo("C"));
+        Assert.That(editor.Items[1].IsChecked, Is.False);
+        Assert.That(editor.Items[2].Text, Is.EqualTo("B"));
+        Assert.That(editor.Items[3].Text, Is.EqualTo("D"));
+    }
+
+    [AvaloniaTest]
+    public void MoveCheckedToEnd_PreservesObjectIdentity()
+    {
+        var editor = new TodoListEditor();
+        editor.MoveCheckedToEnd = true;
+        var a = new TodoItemData("A", false);
+        var b = new TodoItemData("B", false);
+        var c = new TodoItemData("C", false);
+        editor.Items = new ObservableCollection<TodoItemData> { a, b, c };
+
+        editor.ToggleItem(0);
+
+        Assert.That(editor.Items[0], Is.SameAs(b));
+        Assert.That(editor.Items[1], Is.SameAs(c));
+        Assert.That(editor.Items[2], Is.SameAs(a));
+        Assert.That(a.IsChecked, Is.True);
+        Assert.That(a.Text, Is.EqualTo("A"));
+    }
+
+    [AvaloniaTest]
+    public void MoveCheckedToEnd_UncheckPreservesObjectIdentity()
+    {
+        var editor = new TodoListEditor();
+        editor.MoveCheckedToEnd = true;
+        var a = new TodoItemData("A", false);
+        var b = new TodoItemData("B", true);
+        var c = new TodoItemData("C", true);
+        editor.Items = new ObservableCollection<TodoItemData> { a, b, c };
+
+        editor.ToggleItem(1);
+
+        Assert.That(editor.Items[0], Is.SameAs(a));
+        Assert.That(editor.Items[1], Is.SameAs(b));
+        Assert.That(editor.Items[1].IsChecked, Is.False);
+        Assert.That(editor.Items[2], Is.SameAs(c));
+    }
+
+    // ---- CheckboxNavigation tests ----
+
+    [AvaloniaTest]
+    public void CheckboxNavigation_DefaultsFalse()
+    {
+        var editor = new TodoListEditor();
+        Assert.That(editor.CheckboxNavigation, Is.False);
+    }
+
+    [AvaloniaTest]
+    public void MoveCheckedToEnd_DefaultsFalse()
+    {
+        var editor = new TodoListEditor();
+        Assert.That(editor.MoveCheckedToEnd, Is.False);
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_SetUpdatesItemsInPlace()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("Alpha", true),
+            new TodoItemData("Beta", false)
+        };
+        editor.Items = items;
+
+        var original0 = items[0];
+        var original1 = items[1];
+
+        editor.MarkdownText = "- [ ] Changed\n- [x] Also changed";
+
+        Assert.That(editor.Items, Is.SameAs(items));
+        Assert.That(items[0], Is.SameAs(original0));
+        Assert.That(items[1], Is.SameAs(original1));
+        Assert.That(items[0].Text, Is.EqualTo("Changed"));
+        Assert.That(items[0].IsChecked, Is.False);
+        Assert.That(items[1].Text, Is.EqualTo("Also changed"));
+        Assert.That(items[1].IsChecked, Is.True);
+    }
+
+    [AvaloniaTest]
+    public void MarkdownText_SetAddsAndRemovesInPlace()
+    {
+        var editor = new TodoListEditor();
+        var items = new ObservableCollection<TodoItemData>
+        {
+            new TodoItemData("One", false),
+            new TodoItemData("Two", false),
+            new TodoItemData("Three", false)
+        };
+        editor.Items = items;
+
+        editor.MarkdownText = "- [ ] Only one";
+
+        Assert.That(editor.Items, Is.SameAs(items));
+        Assert.That(items.Count, Is.EqualTo(1));
+        Assert.That(items[0].Text, Is.EqualTo("Only one"));
     }
 
     private static Bitmap CreateTestBitmap()

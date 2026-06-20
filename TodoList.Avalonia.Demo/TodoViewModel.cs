@@ -1,3 +1,4 @@
+using System;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -7,6 +8,7 @@ using global::Avalonia;
 using global::Avalonia.Media;
 using global::Avalonia.Media.Imaging;
 using global::Avalonia.Platform;
+using global::Avalonia.Platform.Storage;
 using TodoList.Avalonia.Model;
 
 namespace TodoList.Avalonia.Demo;
@@ -57,15 +59,20 @@ public class TodoViewModel : INotifyPropertyChanged
 
     private void LoadSampleData()
     {
+        var dogBitmap = new Bitmap(
+            global::Avalonia.Platform.AssetLoader.Open(
+                new Uri("avares://TodoList.Avalonia.Demo/Assets/dog.png")));
+
+        Images.Add(new TodoImageEntry("dog", dogBitmap));
         Images.Add(new TodoImageEntry("star", CreateSolidBitmap(Colors.Gold)));
         Images.Add(new TodoImageEntry("check", CreateSolidBitmap(Colors.LimeGreen)));
 
         Items.Add(new TodoItemData("Buy milk"));
-        Items.Add(new TodoItemData("Walk the dog", true));
+        Items.Add(new TodoItemData("Morning walk in the park ![dog](dog)", true));
         Items.Add(new TodoItemData("Code review PR #42"));
         Items.Add(new TodoItemData("MVVM binding example"));
         Items.Add(new TodoItemData("Images in text: ![star](star) great ![ok](check) done"));
-        Items.Add(new TodoItemData("Paste text here (Ctrl+V)"));
+        Items.Add(new TodoItemData("Brush that shiny black coat ![dog](dog)"));
     }
 
     private static WriteableBitmap CreateSolidBitmap(Color color)

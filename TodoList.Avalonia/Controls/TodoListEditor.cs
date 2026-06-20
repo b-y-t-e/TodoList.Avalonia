@@ -101,6 +101,9 @@ public class TodoListEditor : Control
         AvaloniaProperty.Register<TodoListEditor, string?>(nameof(MarkdownText),
             defaultBindingMode: BindingMode.TwoWay);
 
+    public static readonly StyledProperty<IBrush> CheckboxFocusBrushProperty =
+        AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(CheckboxFocusBrush), Brushes.DodgerBlue);
+
     public static readonly StyledProperty<bool> MoveCheckedToEndProperty =
         AvaloniaProperty.Register<TodoListEditor, bool>(nameof(MoveCheckedToEnd), false);
 
@@ -195,6 +198,12 @@ public class TodoListEditor : Control
     {
         get => GetValue(CheckmarkBrushProperty);
         set => SetValue(CheckmarkBrushProperty, value);
+    }
+
+    public IBrush CheckboxFocusBrush
+    {
+        get => GetValue(CheckboxFocusBrushProperty);
+        set => SetValue(CheckboxFocusBrushProperty, value);
     }
 
     public Thickness EditorPadding
@@ -293,6 +302,8 @@ public class TodoListEditor : Control
     private long _cleanGeneration;
     private bool _syncingFontProperties;
     private bool _syncingMarkdownText;
+    private bool _checkboxFocused;
+    private int _checkboxFocusIndex;
 
     private void SyncMarkdownTextFromItems()
     {
@@ -300,6 +311,42 @@ public class TodoListEditor : Control
         _syncingMarkdownText = true;
         try { MarkdownText = TodoMarkdown.ToMarkdown(Items); }
         finally { _syncingMarkdownText = false; }
+    }
+
+    private void ApplyParsedMarkdownToItems(List<TodoItemData> parsed)
+    {
+        var items = Items;
+        if (items == null)
+        {
+            Items = new ObservableCollection<TodoItemData>(parsed);
+            return;
+        }
+
+        using (SuppressSync())
+        {
+            for (int i = 0; i < parsed.Count; i++)
+            {
+                if (i < items.Count)
+                {
+                    if (items[i].Text != parsed[i].Text) items[i].Text = parsed[i].Text;
+                    if (items[i].IsChecked != parsed[i].IsChecked) items[i].IsChecked = parsed[i].IsChecked;
+                }
+                else
+                {
+                    var newData = new TodoItemData(parsed[i].Text, parsed[i].IsChecked);
+                    newData.PropertyChanged += OnItemDataPropertyChanged;
+                    items.Add(newData);
+                }
+            }
+
+            while (items.Count > parsed.Count)
+            {
+                items[items.Count - 1].PropertyChanged -= OnItemDataPropertyChanged;
+                items.RemoveAt(items.Count - 1);
+            }
+        }
+
+        ResetDocumentFromItems();
     }
 
     private SyncGuard SuppressSync() => new(this);
@@ -430,7 +477,8 @@ public class TodoListEditor : Control
             || change.Property == CheckboxCheckedBrushProperty
             || change.Property == CheckboxUncheckedBrushProperty
             || change.Property == CheckboxBorderBrushProperty
-            || change.Property == CheckmarkBrushProperty)
+            || change.Property == CheckmarkBrushProperty
+            || change.Property == CheckboxFocusBrushProperty)
         {
             InvalidateVisual();
         }
@@ -452,9 +500,13 @@ public class TodoListEditor : Control
             try
             {
                 var parsed = TodoMarkdown.ParseMarkdown(change.NewValue as string);
-                Items = new ObservableCollection<TodoItemData>(parsed);
+                ApplyParsedMarkdownToItems(parsed);
             }
             finally { _syncingMarkdownText = false; }
+        }
+        else if (change.Property == MoveCheckedToEndProperty && (bool)change.NewValue!)
+        {
+            SortCheckedToEnd();
         }
     }
 
@@ -473,6 +525,7 @@ public class TodoListEditor : Control
             CheckboxUncheckedBrush = Brushes.White;
             CheckboxBorderBrush = Brushes.Gray;
             CheckmarkBrush = Brushes.White;
+            CheckboxFocusBrush = Brushes.DodgerBlue;
         }
         else if (theme == EditorTheme.Dark)
         {
@@ -485,6 +538,7 @@ public class TodoListEditor : Control
             CheckboxUncheckedBrush = new SolidColorBrush(Color.FromRgb(50, 50, 50));
             CheckboxBorderBrush = new SolidColorBrush(Color.FromRgb(100, 100, 100));
             CheckmarkBrush = Brushes.White;
+            CheckboxFocusBrush = new SolidColorBrush(Color.FromRgb(80, 170, 255));
         }
     }
 
@@ -568,11 +622,23 @@ public class TodoListEditor : Control
 
             double cbX = (EditorPadding.Left - CheckboxSize) / 2;
             double firstLineH = wrappedLines.Count > 0 ? wrappedLines[0].Height : (Document.DefaultFontSize + 4);
-            DrawCheckbox(context, cbX, itemY + firstLineH - CheckboxSize, item.IsChecked);
+            double cbY = itemY + firstLineH - CheckboxSize;
+            DrawCheckbox(context, cbX, cbY, item.IsChecked);
+
+            if (_checkboxFocused && i == _checkboxFocusIndex && _checkboxFocusIndex < Document.Items.Count)
+            {
+                var s = CheckboxSize;
+                var highlightRect = new Rect(cbX - 3, cbY - 3, s + 6, s + 6);
+                var baseColor = (CheckboxFocusBrush as ISolidColorBrush)?.Color ?? Colors.DodgerBlue;
+                var highlightBrush = new SolidColorBrush(Color.FromArgb(40, baseColor.R, baseColor.G, baseColor.B));
+                context.FillRectangle(highlightBrush, highlightRect);
+                var focusPen = new Pen(CheckboxFocusBrush, 2.5);
+                context.DrawRectangle(null, focusPen, new RoundedRect(highlightRect, s * 0.25));
+            }
 
             if (item.Elements.Count == 0)
             {
-                if (i == Caret.ItemIndex && !HasSelection)
+                if (i == Caret.ItemIndex && !HasSelection && !_checkboxFocused)
                     context.FillRectangle(CaretBrush,
                         new Rect(EditorPadding.Left, itemY, 1.5, Document.DefaultFontSize + 4));
                 continue;
@@ -634,7 +700,7 @@ public class TodoListEditor : Control
                 }
             }
 
-            if (i == Caret.ItemIndex && !HasSelection)
+            if (i == Caret.ItemIndex && !HasSelection && !_checkboxFocused)
             {
                 var (caretX, caretYOff, caretLineH) = CalculateCaretPosition(i, Caret.Offset);
                 context.FillRectangle(CaretBrush,
@@ -1043,12 +1109,22 @@ public class TodoListEditor : Control
             int itemIdx = HitTestItem(pos.Y);
             if (itemIdx >= 0 && itemIdx < Document.Items.Count)
             {
+                if (CheckboxNavigation)
+                {
+                    _checkboxFocused = true;
+                    _checkboxFocusIndex = itemIdx;
+                    InvalidateVisual();
+                }
                 SaveUndoState();
-                Document.Items[itemIdx].IsChecked = !Document.Items[itemIdx].IsChecked;
-                InvalidateMeasure();
-                NotifyDocumentChanged(ChangeKind.CheckedChanged);
+                ToggleItemCore(itemIdx);
             }
             return;
+        }
+
+        if (_checkboxFocused)
+        {
+            _checkboxFocused = false;
+            InvalidateVisual();
         }
 
         var cursor = HitTestCursor(pos);
@@ -1145,6 +1221,12 @@ public class TodoListEditor : Control
         base.OnTextInput(e);
         if (string.IsNullOrEmpty(e.Text)) return;
 
+        if (_checkboxFocused)
+        {
+            e.Handled = true;
+            return;
+        }
+
         SaveUndoState(HasSelection ? UndoActionKind.Other : UndoActionKind.Typing);
         DeleteSelection();
         InsertTextAtCaret(e.Text);
@@ -1154,6 +1236,10 @@ public class TodoListEditor : Control
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+
+        if (_checkboxFocused && HandleCheckboxNavigationKey(e))
+            return;
+
         var ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
         var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
 
@@ -1208,7 +1294,16 @@ public class TodoListEditor : Control
                 break;
 
             case Key.Left:
-                MoveCaret(-1, shift);
+                if (CheckboxNavigation && !shift && Caret.Offset == 0)
+                {
+                    _checkboxFocused = true;
+                    _checkboxFocusIndex = Caret.ItemIndex;
+                    InvalidateVisual();
+                }
+                else
+                {
+                    MoveCaret(-1, shift);
+                }
                 e.Handled = true;
                 break;
 
@@ -2038,6 +2133,103 @@ public class TodoListEditor : Control
         InvalidateMeasure();
     }
 
+    // ---- Checkbox navigation ----
+
+    private bool HandleCheckboxNavigationKey(KeyEventArgs e)
+    {
+        if (Document.Items.Count == 0)
+        {
+            e.Handled = true;
+            return true;
+        }
+
+        _checkboxFocusIndex = Math.Clamp(_checkboxFocusIndex, 0, Document.Items.Count - 1);
+
+        switch (e.Key)
+        {
+            case Key.Space:
+                if (_checkboxFocusIndex >= 0 && _checkboxFocusIndex < Document.Items.Count)
+                {
+                    SaveUndoState();
+                    ToggleItemCore(_checkboxFocusIndex);
+                }
+                e.Handled = true;
+                return true;
+
+            case Key.Up:
+                if (_checkboxFocusIndex > 0)
+                {
+                    _checkboxFocusIndex--;
+                    InvalidateVisual();
+                }
+                e.Handled = true;
+                return true;
+
+            case Key.Down:
+                if (_checkboxFocusIndex < Document.Items.Count - 1)
+                {
+                    _checkboxFocusIndex++;
+                    InvalidateVisual();
+                }
+                e.Handled = true;
+                return true;
+
+            case Key.PageUp:
+                _checkboxFocusIndex = Math.Max(0, _checkboxFocusIndex - VisibleItemCount());
+                InvalidateVisual();
+                e.Handled = true;
+                return true;
+
+            case Key.PageDown:
+                _checkboxFocusIndex = Math.Min(Document.Items.Count - 1,
+                    _checkboxFocusIndex + VisibleItemCount());
+                InvalidateVisual();
+                e.Handled = true;
+                return true;
+
+            case Key.Home:
+                _checkboxFocusIndex = 0;
+                InvalidateVisual();
+                e.Handled = true;
+                return true;
+
+            case Key.End:
+                _checkboxFocusIndex = Document.Items.Count - 1;
+                InvalidateVisual();
+                e.Handled = true;
+                return true;
+
+            case Key.Right:
+                _checkboxFocused = false;
+                Caret = new CursorPosition(_checkboxFocusIndex, 0);
+                SelectionAnchor = Caret;
+                InvalidateMeasure();
+                e.Handled = true;
+                return true;
+
+            case Key.Escape:
+                _checkboxFocused = false;
+                InvalidateVisual();
+                e.Handled = true;
+                return true;
+
+            default:
+                _checkboxFocused = false;
+                InvalidateVisual();
+                return false;
+        }
+    }
+
+    private int VisibleItemCount()
+    {
+        if (Bounds.Height <= 0 || _itemHeights.Count == 0) return 5;
+        double avgHeight = 0;
+        for (int i = 0; i < _itemHeights.Count; i++)
+            avgHeight += _itemHeights[i];
+        avgHeight /= _itemHeights.Count;
+        return Math.Max(1, (int)(Bounds.Height / (avgHeight + LineSpacing)));
+    }
+
     // ---- Undo / Redo ----
 
     private UndoSnapshot CaptureSnapshot()
@@ -2157,7 +2349,13 @@ public class TodoListEditor : Control
             foreach (var item in newItems)
                 item.PropertyChanged += OnItemDataPropertyChanged;
 
+        _checkboxFocusIndex = 0;
+
         ResetDocumentFromItems();
+
+        if (MoveCheckedToEnd)
+            SortCheckedToEnd();
+
         SyncMarkdownTextFromItems();
     }
 
@@ -2364,7 +2562,11 @@ public class TodoListEditor : Control
             _legacyImageStore.Clear();
             if (Images != null)
                 foreach (var entry in Images)
+                {
                     SubscribeImageEntry(entry);
+                    if (entry.Bitmap != null)
+                        _legacyImageStore[entry.Key] = entry.Bitmap;
+                }
         }
         else
         {
@@ -2607,11 +2809,92 @@ public class TodoListEditor : Control
     public void ToggleItem(int index)
     {
         if (index >= 0 && index < Document.Items.Count)
+            ToggleItemCore(index);
+    }
+
+    private void ToggleItemCore(int index)
+    {
+        var item = Document.Items[index];
+        item.IsChecked = !item.IsChecked;
+
+        if (MoveCheckedToEnd)
         {
-            Document.Items[index].IsChecked = !Document.Items[index].IsChecked;
-            InvalidateMeasure();
-            NotifyDocumentChanged(ChangeKind.CheckedChanged);
+            int newIndex = index;
+
+            if (item.IsChecked && index < Document.Items.Count - 1)
+            {
+                int lastUnchecked = Document.Items.Count - 1;
+                while (lastUnchecked > index && Document.Items[lastUnchecked].IsChecked)
+                    lastUnchecked--;
+
+                if (lastUnchecked > index)
+                    newIndex = lastUnchecked;
+            }
+            else if (!item.IsChecked)
+            {
+                int firstChecked = 0;
+                while (firstChecked < Document.Items.Count && !Document.Items[firstChecked].IsChecked)
+                    firstChecked++;
+
+                if (firstChecked < index)
+                    newIndex = firstChecked;
+            }
+
+            if (newIndex != index)
+            {
+                Document.Items.RemoveAt(index);
+                Document.Items.Insert(newIndex, item);
+
+                var mvvmItems = Items;
+                if (mvvmItems != null && index < mvvmItems.Count)
+                {
+                    using (SuppressSync())
+                    {
+                        var mvvmItem = mvvmItems[index];
+                        mvvmItems.RemoveAt(index);
+                        mvvmItems.Insert(Math.Min(newIndex, mvvmItems.Count), mvvmItem);
+                    }
+                }
+
+                if (Caret.ItemIndex == index)
+                    Caret = new CursorPosition(newIndex, Caret.Offset);
+                else if (index < newIndex && Caret.ItemIndex > index && Caret.ItemIndex <= newIndex)
+                    Caret = new CursorPosition(Caret.ItemIndex - 1, Caret.Offset);
+                else if (index > newIndex && Caret.ItemIndex >= newIndex && Caret.ItemIndex < index)
+                    Caret = new CursorPosition(Caret.ItemIndex + 1, Caret.Offset);
+
+                SelectionAnchor = Caret;
+
+                if (_checkboxFocused)
+                    _checkboxFocusIndex = Math.Clamp(_checkboxFocusIndex, 0, Document.Items.Count - 1);
+            }
         }
+
+        InvalidateMeasure();
+        NotifyDocumentChanged(ChangeKind.CheckedChanged);
+    }
+
+    private void SortCheckedToEnd()
+    {
+        var items = Items;
+        if (items == null || items.Count <= 1) return;
+
+        var uncheckedItems = new List<TodoItemData>();
+        var checkedItems = new List<TodoItemData>();
+        foreach (var item in items)
+            (item.IsChecked ? checkedItems : uncheckedItems).Add(item);
+
+        if (checkedItems.Count == 0 || uncheckedItems.Count == 0) return;
+
+        using (SuppressSync())
+        {
+            items.Clear();
+            foreach (var item in uncheckedItems) items.Add(item);
+            foreach (var item in checkedItems) items.Add(item);
+        }
+
+        ResetDocumentFromItems();
+        SyncMarkdownTextFromItems();
     }
 
     public IReadOnlyList<TodoItem> GetCheckedItems() =>

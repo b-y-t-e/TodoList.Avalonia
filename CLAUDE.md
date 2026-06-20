@@ -11,7 +11,6 @@ TodoList.Avalonia — a custom rich-text todo-list editor control for Avalonia U
 ```bash
 dotnet build TodoList.Avalonia.slnx
 dotnet run --project TodoList.Avalonia.Demo
-dotnet run --project TodoList.Avalonia.Demo -- --mvvm
 dotnet test TodoList.Avalonia.Tests
 dotnet test TodoList.Avalonia.Tests --filter "TestName"
 ```
@@ -69,8 +68,7 @@ All visual properties (colors, fonts, sizes, padding) are Avalonia `StyledProper
 
 ## Demo app
 
-- **`MainWindow`** — direct/imperative API usage (legacy `ImageStore`, programmatic events)
-- **`MvvmWindow`** — XAML + code-behind MVVM demo (`MvvmWindow.axaml` + `TodoViewModel`)
+- **`MvvmWindow`** — XAML MVVM demo (`MvvmWindow.axaml` + `TodoViewModel`), default startup window
 
 ## Conventions
 

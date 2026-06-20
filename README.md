@@ -97,6 +97,10 @@ TodoList.Avalonia.Demo/      Demo application
 TodoList.Avalonia.Tests/     NUnit tests (headless Avalonia)
 ```
 
+## Roadmap
+
+- [ ] Android soft keyboard support — implement `ITextInputMethodClient` so the on-screen keyboard appears when the editor receives focus on mobile platforms
+
 ## License
 
 MIT

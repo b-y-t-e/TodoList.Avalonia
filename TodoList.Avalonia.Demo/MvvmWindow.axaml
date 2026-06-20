@@ -30,13 +30,19 @@
           <Button Content="Check all" Margin="4" Command="{Binding CheckAllCommand}" />
           <Button Content="Uncheck all" Margin="4" Command="{Binding UncheckAllCommand}" />
           <Button Content="Remove checked" Margin="4" Command="{Binding RemoveCheckedCommand}" />
+          <CheckBox x:Name="MoveCheckedToggle" Content="Move checked to end" Margin="8,4"
+                    VerticalAlignment="Center" IsChecked="True" />
+          <CheckBox x:Name="CheckboxNavToggle" Content="Checkbox navigation" Margin="8,4"
+                    VerticalAlignment="Center" IsChecked="True" />
         </StackPanel>
 
         <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto">
-          <todo:TodoListEditor DefaultFontSize="15"
+          <todo:TodoListEditor x:Name="Editor" DefaultFontSize="15"
                                Items="{Binding Items}"
-                               Images="{Binding Images}">
+                               Images="{Binding Images}"
+                               MoveCheckedToEnd="{Binding #MoveCheckedToggle.IsChecked}"
+                               CheckboxNavigation="{Binding #CheckboxNavToggle.IsChecked}">
             <todo:TodoListEditor.DefaultFont>
               <FontFamily>Segoe UI</FontFamily>
             </todo:TodoListEditor.DefaultFont>
