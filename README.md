@@ -26,6 +26,18 @@ dotnet add package TodoList.Avalonia
 
 ## Usage (MVVM)
 
+### 1. MarkdownText — single-string binding
+
+Bind `MarkdownText` for two-way markdown sync (simplest approach):
+
+```xml
+<todo:TodoListEditor MarkdownText="{Binding Markdown}" />
+```
+
+### 2. Items + Images — collection binding
+
+Bind `Items` and `Images` collections for full control:
+
 ```xml
 <todo:TodoListEditor Items="{Binding Items}" Images="{Binding Images}" />
 ```
@@ -36,15 +48,9 @@ public ObservableCollection<TodoItemData> Items { get; } = new();
 public ObservableCollection<TodoImageEntry> Images { get; } = new();
 ```
 
-### Markdown serialization
+### Markdown helpers
 
-Bind `MarkdownText` directly for two-way markdown sync:
-
-```xml
-<todo:TodoListEditor MarkdownText="{Binding Markdown}" />
-```
-
-Or use the static helpers (accepts both `- [x] text` and `[x] text` formats):
+Static helpers for manual conversion (accepts both `- [x] text` and `[x] text` formats):
 
 ```csharp
 // Load
