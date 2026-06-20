@@ -304,6 +304,7 @@ public class TodoListEditor : Control
     private bool _syncingMarkdownText;
     private bool _checkboxFocused;
     private int _checkboxFocusIndex;
+    private double _goalX = -1;
 
     private void SyncMarkdownTextFromItems()
     {
@@ -1101,6 +1102,7 @@ public class TodoListEditor : Control
     {
         base.OnPointerPressed(e);
         Focus();
+        _goalX = -1;
 
         var pos = e.GetPosition(this);
 
@@ -1220,6 +1222,7 @@ public class TodoListEditor : Control
     {
         base.OnTextInput(e);
         if (string.IsNullOrEmpty(e.Text)) return;
+        _goalX = -1;
 
         if (_checkboxFocused)
         {
@@ -1239,6 +1242,9 @@ public class TodoListEditor : Control
 
         if (_checkboxFocused && HandleCheckboxNavigationKey(e))
             return;
+
+        if (e.Key != Key.Up && e.Key != Key.Down)
+            _goalX = -1;
 
         var ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
         var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
@@ -2062,28 +2068,26 @@ public class TodoListEditor : Control
         EnsureValidCaret();
         int itemIdx = Caret.ItemIndex;
 
+        if (_goalX < 0)
+        {
+            var (cx, _, _) = CalculateCaretPosition(itemIdx, Caret.Offset);
+            _goalX = cx;
+        }
+
+        double useX = _goalX;
+
         if (itemIdx < _itemWrapping.Count)
         {
             var wrappedLines = _itemWrapping[itemIdx];
 
-            int currentLineIdx = 0;
-            for (int li = 0; li < wrappedLines.Count; li++)
-            {
-                if (Caret.Offset < wrappedLines[li].EndGlobalOffset
-                    || li == wrappedLines.Count - 1)
-                {
-                    currentLineIdx = li;
-                    break;
-                }
-            }
+            int currentLineIdx = FindCurrentWrappedLine(wrappedLines, Caret.Offset, direction);
 
             int targetLineIdx = currentLineIdx + direction;
 
             if (targetLineIdx >= 0 && targetLineIdx < wrappedLines.Count)
             {
-                var (caretX, _, _) = CalculateCaretPosition(itemIdx, Caret.Offset);
                 int newOffset = HitTestLineOffset(
-                    Document.Items[itemIdx], wrappedLines[targetLineIdx], caretX);
+                    Document.Items[itemIdx], wrappedLines[targetLineIdx], useX);
                 Caret = new CursorPosition(itemIdx, newOffset);
                 if (!extend) SelectionAnchor = Caret;
                 InvalidateMeasure();
@@ -2092,12 +2096,11 @@ public class TodoListEditor : Control
 
             if (direction < 0 && itemIdx > 0)
             {
-                var (caretX, _, _) = CalculateCaretPosition(itemIdx, Caret.Offset);
                 int prevIdx = itemIdx - 1;
                 if (prevIdx < _itemWrapping.Count && _itemWrapping[prevIdx].Count > 0)
                 {
                     int newOffset = HitTestLineOffset(
-                        Document.Items[prevIdx], _itemWrapping[prevIdx][^1], caretX);
+                        Document.Items[prevIdx], _itemWrapping[prevIdx][^1], useX);
                     Caret = new CursorPosition(prevIdx, newOffset);
                 }
                 else
@@ -2105,20 +2108,29 @@ public class TodoListEditor : Control
                     Caret = new CursorPosition(prevIdx, Document.Items[prevIdx].TextLength);
                 }
             }
+            else if (direction < 0 && itemIdx == 0 && Caret.Offset > 0)
+            {
+                Caret = new CursorPosition(0, 0);
+            }
             else if (direction > 0 && itemIdx < Document.Items.Count - 1)
             {
-                var (caretX, _, _) = CalculateCaretPosition(itemIdx, Caret.Offset);
                 int nextIdx = itemIdx + 1;
                 if (nextIdx < _itemWrapping.Count && _itemWrapping[nextIdx].Count > 0)
                 {
                     int newOffset = HitTestLineOffset(
-                        Document.Items[nextIdx], _itemWrapping[nextIdx][0], caretX);
+                        Document.Items[nextIdx], _itemWrapping[nextIdx][0], useX);
                     Caret = new CursorPosition(nextIdx, newOffset);
                 }
                 else
                 {
                     Caret = new CursorPosition(nextIdx, 0);
                 }
+            }
+            else if (direction > 0 && itemIdx == Document.Items.Count - 1)
+            {
+                int endOffset = Document.Items[itemIdx].TextLength;
+                if (Caret.Offset < endOffset)
+                    Caret = new CursorPosition(itemIdx, endOffset);
             }
         }
         else
@@ -2131,6 +2143,24 @@ public class TodoListEditor : Control
 
         if (!extend) SelectionAnchor = Caret;
         InvalidateMeasure();
+    }
+
+    private static int FindCurrentWrappedLine(List<WrappedLine> wrappedLines, int offset, int direction)
+    {
+        for (int li = 0; li < wrappedLines.Count; li++)
+        {
+            int end = wrappedLines[li].EndGlobalOffset;
+            if (offset < end)
+                return li;
+            if (offset == end)
+            {
+                // At a wrap boundary: if moving down, prefer the next line (cursor is at its start)
+                if (direction > 0 && li + 1 < wrappedLines.Count)
+                    return li + 1;
+                return li;
+            }
+        }
+        return wrappedLines.Count - 1;
     }
 
     // ---- Checkbox navigation ----

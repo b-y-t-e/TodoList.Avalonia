@@ -8,7 +8,6 @@ using global::Avalonia;
 using global::Avalonia.Media;
 using global::Avalonia.Media.Imaging;
 using global::Avalonia.Platform;
-using global::Avalonia.Platform.Storage;
 using TodoList.Avalonia.Model;
 
 namespace TodoList.Avalonia.Demo;
