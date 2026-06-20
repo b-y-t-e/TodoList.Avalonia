@@ -38,6 +38,14 @@ public ObservableCollection<TodoImageEntry> Images { get; } = new();
 
 ### Markdown serialization
 
+Bind `MarkdownText` directly for two-way markdown sync:
+
+```xml
+<todo:TodoListEditor MarkdownText="{Binding Markdown}" />
+```
+
+Or use the static helpers (accepts both `- [x] text` and `[x] text` formats):
+
 ```csharp
 // Load
 foreach (var item in TodoMarkdown.ParseMarkdown(markdown))

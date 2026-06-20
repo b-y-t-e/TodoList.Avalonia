@@ -59,7 +59,9 @@ Generation counter: `_changeGeneration` incremented on each change, compared to 
 
 ### Markdown helpers
 
-`TodoMarkdown.ParseMarkdown(string?)` / `ToMarkdown(IEnumerable<TodoItemData>?)` — static helpers for `- [x] text` / `- [ ] text` format.
+`TodoMarkdown.ParseMarkdown(string?)` / `ToMarkdown(IEnumerable<TodoItemData>?)` — static helpers. Parsing accepts both `- [x] text` (canonical) and `[x] text` (without dash prefix). Output always uses canonical `- [x] ` / `- [ ] ` format.
+
+`MarkdownText` StyledProperty (TwoWay) on `TodoListEditor` — bidirectional markdown string view of `Items`. Setting it parses and replaces Items; editing Items/collection/properties syncs back. Guarded by `_syncingMarkdownText` to prevent circular updates.
 
 ### Configuration surface
 
