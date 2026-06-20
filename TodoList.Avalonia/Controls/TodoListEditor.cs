@@ -101,6 +101,12 @@ public class TodoListEditor : Control
         AvaloniaProperty.Register<TodoListEditor, string?>(nameof(MarkdownText),
             defaultBindingMode: BindingMode.TwoWay);
 
+    public static readonly StyledProperty<bool> MoveCheckedToEndProperty =
+        AvaloniaProperty.Register<TodoListEditor, bool>(nameof(MoveCheckedToEnd), false);
+
+    public static readonly StyledProperty<bool> CheckboxNavigationProperty =
+        AvaloniaProperty.Register<TodoListEditor, bool>(nameof(CheckboxNavigation), false);
+
     public EditorTheme ColorTheme
     {
         get => GetValue(ColorThemeProperty);
@@ -240,6 +246,18 @@ public class TodoListEditor : Control
     {
         get => GetValue(MarkdownTextProperty);
         set => SetValue(MarkdownTextProperty, value);
+    }
+
+    public bool MoveCheckedToEnd
+    {
+        get => GetValue(MoveCheckedToEndProperty);
+        set => SetValue(MoveCheckedToEndProperty, value);
+    }
+
+    public bool CheckboxNavigation
+    {
+        get => GetValue(CheckboxNavigationProperty);
+        set => SetValue(CheckboxNavigationProperty, value);
     }
 
     private readonly Dictionary<string, Bitmap> _legacyImageStore = new();
@@ -627,15 +645,26 @@ public class TodoListEditor : Control
 
     private void DrawCheckbox(DrawingContext ctx, double x, double y, bool isChecked)
     {
-        var rect = new Rect(x, y, CheckboxSize, CheckboxSize);
-        ctx.FillRectangle(isChecked ? CheckboxCheckedBrush : CheckboxUncheckedBrush, rect);
-        ctx.DrawRectangle(new Pen(CheckboxBorderBrush, 1.5), rect);
+        var s = CheckboxSize;
+        var r = s * 0.2;
+        var rect = new RoundedRect(new Rect(x, y, s, s), r);
+
+        ctx.DrawRectangle(isChecked ? CheckboxCheckedBrush : CheckboxUncheckedBrush,
+            new Pen(isChecked ? CheckboxCheckedBrush : CheckboxBorderBrush, 1.5), rect);
 
         if (isChecked)
         {
-            var pen = new Pen(CheckmarkBrush, 2);
-            ctx.DrawLine(pen, new Point(x + 3, y + 8), new Point(x + 6, y + 12));
-            ctx.DrawLine(pen, new Point(x + 6, y + 12), new Point(x + 13, y + 4));
+            var pen = new Pen(CheckmarkBrush, s * 0.13)
+            {
+                LineCap = PenLineCap.Round,
+                LineJoin = PenLineJoin.Round
+            };
+            ctx.DrawLine(pen,
+                new Point(x + s * 0.22, y + s * 0.52),
+                new Point(x + s * 0.40, y + s * 0.72));
+            ctx.DrawLine(pen,
+                new Point(x + s * 0.40, y + s * 0.72),
+                new Point(x + s * 0.78, y + s * 0.28));
         }
     }
 
