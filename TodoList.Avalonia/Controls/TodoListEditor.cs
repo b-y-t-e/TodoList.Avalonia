@@ -16,6 +16,8 @@ using global::Avalonia.Layout;
 using global::Avalonia.Input.Platform;
 using global::Avalonia.Media;
 using global::Avalonia.Media.Imaging;
+using global::Avalonia.Threading;
+using global::Avalonia.VisualTree;
 using TodoList.Avalonia.Model;
 
 namespace TodoList.Avalonia.Controls;
@@ -305,6 +307,29 @@ public class TodoListEditor : Control
     private bool _checkboxFocused;
     private int _checkboxFocusIndex;
     private double _goalX = -1;
+    private const int MaxCacheEntries = 4096;
+    private const int ResizeDebounceMs = 150;
+    private readonly Dictionary<(string text, Typeface typeface, double fontSize), double> _measureCache = new();
+    private readonly Dictionary<(string text, Typeface typeface, double fontSize, Color foreground), FormattedText> _fmtCache = new();
+    private readonly HashSet<int> _dirtyItems = new();
+    private bool _fullLayoutRequired = true;
+    private ScrollViewer? _parentScrollViewer;
+    private double _viewportTop;
+    private double _viewportBottom;
+    private bool _resizePending;
+    private DispatcherTimer? _resizeTimer;
+
+    private void ClearTextCaches()
+    {
+        _measureCache.Clear();
+        _fmtCache.Clear();
+    }
+
+    private void InvalidateItem(int itemIndex)
+    {
+        _dirtyItems.Add(itemIndex);
+        InvalidateMeasure();
+    }
 
     private void SyncMarkdownTextFromItems()
     {
@@ -409,12 +434,118 @@ public class TodoListEditor : Control
         SyncDocumentDefaults();
     }
 
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        _parentScrollViewer = this.FindAncestorOfType<ScrollViewer>();
+        if (_parentScrollViewer != null)
+            _parentScrollViewer.ScrollChanged += OnParentScrollChanged;
+    }
+
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        if (_resizeTimer != null)
+        {
+            _resizeTimer.Stop();
+            _resizeTimer.Tick -= OnResizeTimerTick;
+            _resizeTimer = null;
+        }
+        if (_parentScrollViewer != null)
+        {
+            _parentScrollViewer.ScrollChanged -= OnParentScrollChanged;
+            _parentScrollViewer = null;
+        }
         base.OnDetachedFromVisualTree(e);
         UnsubscribeItems(Items);
         UnsubscribeImages(Images);
         _imageCache.Clear();
+    }
+
+    private void OnParentScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        UpdateViewportBounds();
+        InvalidateVisual();
+    }
+
+    private void UpdateViewportBounds()
+    {
+        if (_parentScrollViewer == null)
+        {
+            _viewportTop = 0;
+            _viewportBottom = _desiredHeight;
+            return;
+        }
+        _viewportTop = _parentScrollViewer.Offset.Y;
+        _viewportBottom = _viewportTop + _parentScrollViewer.Viewport.Height;
+    }
+
+    private (int first, int last) GetVisibleItemRange()
+    {
+        if (_itemYPositions.Count == 0)
+            return (0, -1);
+
+        int first = BinarySearchFirstVisible();
+        int last = BinarySearchLastVisible();
+
+        first = Math.Max(0, first - 1);
+        last = Math.Min(_itemYPositions.Count - 1, last + 1);
+
+        return (first, last);
+    }
+
+    private int BinarySearchFirstVisible()
+    {
+        int lo = 0, hi = _itemYPositions.Count - 1;
+        int result = 0;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) / 2;
+            if (_itemYPositions[mid] + _itemHeights[mid] >= _viewportTop)
+            {
+                result = mid;
+                hi = mid - 1;
+            }
+            else
+                lo = mid + 1;
+        }
+        return result;
+    }
+
+    private int BinarySearchLastVisible()
+    {
+        int lo = 0, hi = _itemYPositions.Count - 1;
+        int result = hi;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) / 2;
+            if (_itemYPositions[mid] <= _viewportBottom)
+            {
+                result = mid;
+                lo = mid + 1;
+            }
+            else
+                hi = mid - 1;
+        }
+        return result;
+    }
+
+    private void EnsureCaretVisible()
+    {
+        if (_parentScrollViewer == null || _itemYPositions.Count == 0)
+            return;
+
+        int idx = Math.Clamp(Caret.ItemIndex, 0, _itemYPositions.Count - 1);
+        double caretTop = _itemYPositions[idx];
+        double caretBottom = caretTop + _itemHeights[idx];
+
+        var offset = _parentScrollViewer.Offset;
+        double viewTop = offset.Y;
+        double viewBottom = viewTop + _parentScrollViewer.Viewport.Height;
+
+        if (caretTop < viewTop)
+            _parentScrollViewer.Offset = new Vector(offset.X, caretTop);
+        else if (caretBottom > viewBottom)
+            _parentScrollViewer.Offset = new Vector(offset.X, caretBottom - _parentScrollViewer.Viewport.Height);
     }
 
     private void UnsubscribeItems(IList<TodoItemData>? items)
@@ -431,6 +562,7 @@ public class TodoListEditor : Control
         base.OnPropertyChanged(change);
         if (change.Property == DefaultFontProperty || change.Property == DefaultFontSizeProperty)
         {
+            ClearTextCaches();
             SyncDocumentDefaults();
             if (change.Property == DefaultFontProperty && !_syncingFontProperties)
             {
@@ -470,9 +602,13 @@ public class TodoListEditor : Control
         {
             ApplyTheme((EditorTheme)change.NewValue!);
         }
+        else if (change.Property == ForegroundProperty
+            || change.Property == CheckedForegroundProperty)
+        {
+            _fmtCache.Clear();
+            InvalidateVisual();
+        }
         else if (change.Property == BackgroundBrushProperty
-            || change.Property == ForegroundProperty
-            || change.Property == CheckedForegroundProperty
             || change.Property == SelectionBrushProperty
             || change.Property == CaretBrushProperty
             || change.Property == CheckboxCheckedBrushProperty
@@ -551,55 +687,155 @@ public class TodoListEditor : Control
 
     // ---- Layout ----
 
+    private double AvailableContentWidth =>
+        Math.Max((_desiredWidth > 0 ? _desiredWidth : 400) - EditorPadding.Left - EditorPadding.Right, 50);
+
+    private double ComputeItemHeight(List<WrappedLine> wrappedLines)
+    {
+        double height = 0;
+        for (int li = 0; li < wrappedLines.Count; li++)
+        {
+            height += wrappedLines[li].Height;
+            if (li < wrappedLines.Count - 1) height += WrapLineSpacing;
+        }
+        return Math.Max(height, Document.DefaultFontSize + 4);
+    }
+
     private void ComputeLayout()
     {
         _itemYPositions.Clear();
         _itemHeights.Clear();
         _itemWrapping.Clear();
+        _dirtyItems.Clear();
+        _fullLayoutRequired = false;
+        _resizePending = false;
 
-        double availWidth = Math.Max((_desiredWidth > 0 ? _desiredWidth : 400) - EditorPadding.Left - EditorPadding.Right, 50);
+        double availWidth = AvailableContentWidth;
         double y = EditorPadding.Top;
 
         for (int i = 0; i < Document.Items.Count; i++)
         {
-            var item = Document.Items[i];
             _itemYPositions.Add(y);
 
-            var wrappedLines = ComputeItemWrapping(item, availWidth);
+            var wrappedLines = ComputeItemWrapping(Document.Items[i], availWidth);
             _itemWrapping.Add(wrappedLines);
 
-            double itemH = 0;
-            for (int li = 0; li < wrappedLines.Count; li++)
-            {
-                itemH += wrappedLines[li].Height;
-                if (li < wrappedLines.Count - 1) itemH += WrapLineSpacing;
-            }
-            itemH = Math.Max(itemH, Document.DefaultFontSize + 4);
-
+            double itemH = ComputeItemHeight(wrappedLines);
             _itemHeights.Add(itemH);
             y += itemH + LineSpacing;
         }
 
-        _desiredHeight = y + EditorPadding.Top;
+        _desiredHeight = y + EditorPadding.Bottom;
+    }
+
+    private void ComputeIncrementalLayout()
+    {
+        double availWidth = AvailableContentWidth;
+
+        foreach (int i in _dirtyItems.OrderBy(x => x))
+        {
+            if (i >= Document.Items.Count || i >= _itemWrapping.Count) continue;
+
+            double oldHeight = _itemHeights[i];
+            var wrappedLines = ComputeItemWrapping(Document.Items[i], availWidth);
+            _itemWrapping[i] = wrappedLines;
+
+            double newHeight = ComputeItemHeight(wrappedLines);
+            double delta = newHeight - oldHeight;
+            _itemHeights[i] = newHeight;
+
+            if (Math.Abs(delta) > 0.001)
+            {
+                for (int j = i + 1; j < _itemYPositions.Count; j++)
+                    _itemYPositions[j] += delta;
+                _desiredHeight += delta;
+            }
+        }
+        _dirtyItems.Clear();
     }
 
     protected override Size MeasureOverride(Size availableSize)
     {
         double w = double.IsInfinity(availableSize.Width) ? 400 : availableSize.Width;
-        _desiredWidth = Math.Max(w, 200);
-        ComputeLayout();
+        double newWidth = Math.Max(w, 200);
+
+        if (_fullLayoutRequired || _itemWrapping.Count != Document.Items.Count)
+        {
+            _desiredWidth = newWidth;
+            ComputeLayout();
+        }
+        else if (Math.Abs(newWidth - _desiredWidth) > 0.1)
+        {
+            _desiredWidth = newWidth;
+            ComputeViewportResizeLayout();
+        }
+        else if (_dirtyItems.Count > 0)
+        {
+            ComputeIncrementalLayout();
+        }
+
         return new Size(_desiredWidth, _desiredHeight);
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
         double newWidth = Math.Max(finalSize.Width, 200);
-        if (_itemWrapping.Count == 0 || Math.Abs(newWidth - _desiredWidth) > 0.1)
+        if (_itemWrapping.Count == 0)
         {
             _desiredWidth = newWidth;
             ComputeLayout();
         }
+        else if (Math.Abs(newWidth - _desiredWidth) > 0.1)
+        {
+            _desiredWidth = newWidth;
+            ComputeViewportResizeLayout();
+        }
         return new Size(_desiredWidth, Math.Max(finalSize.Height, _desiredHeight));
+    }
+
+    private void ComputeViewportResizeLayout()
+    {
+        double availWidth = AvailableContentWidth;
+        var (first, last) = GetVisibleItemRange();
+
+        for (int i = first; i <= last && i < Document.Items.Count && i < _itemHeights.Count; i++)
+        {
+            double oldHeight = _itemHeights[i];
+            var wrappedLines = ComputeItemWrapping(Document.Items[i], availWidth);
+            _itemWrapping[i] = wrappedLines;
+            _itemHeights[i] = ComputeItemHeight(wrappedLines);
+            double delta = _itemHeights[i] - oldHeight;
+
+            if (Math.Abs(delta) > 0.001)
+            {
+                for (int j = i + 1; j < _itemYPositions.Count; j++)
+                    _itemYPositions[j] += delta;
+                _desiredHeight += delta;
+            }
+        }
+
+        ScheduleDeferredLayout();
+    }
+
+    private void ScheduleDeferredLayout()
+    {
+        _resizePending = true;
+        if (_resizeTimer == null)
+        {
+            _resizeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ResizeDebounceMs) };
+            _resizeTimer.Tick += OnResizeTimerTick;
+        }
+        _resizeTimer.Stop();
+        _resizeTimer.Start();
+    }
+
+    private void OnResizeTimerTick(object? sender, EventArgs e)
+    {
+        _resizeTimer?.Stop();
+        if (!_resizePending) return;
+        _resizePending = false;
+        _fullLayoutRequired = true;
+        InvalidateMeasure();
     }
 
     // ---- Rendering ----
@@ -612,10 +848,13 @@ public class TodoListEditor : Control
         if (_itemWrapping.Count != Document.Items.Count)
             ComputeLayout();
 
+        UpdateViewportBounds();
+        var (firstVisible, lastVisible) = GetVisibleItemRange();
+
         var (selFirst, selLast) = CurrentSelection.Ordered();
         var selBrush = SelectionBrush;
 
-        for (int i = 0; i < Document.Items.Count; i++)
+        for (int i = firstVisible; i <= lastVisible && i < Document.Items.Count; i++)
         {
             var item = Document.Items[i];
             double itemY = _itemYPositions[i];
@@ -684,10 +923,17 @@ public class TodoListEditor : Control
                             context.FillRectangle(selBrush, new Rect(segX + sX, segY, sW, seg.Height));
                         }
 
-                        var fmt = new FormattedText(segText,
-                            System.Globalization.CultureInfo.CurrentCulture,
-                            FlowDirection.LeftToRight, typeface, fs,
-                            item.IsChecked ? CheckedForeground : Foreground);
+                        var fgBrush = item.IsChecked ? CheckedForeground : Foreground;
+                        var fgColor = (fgBrush as ISolidColorBrush)?.Color ?? Colors.Black;
+                        var fmtKey = (segText, typeface, fs, fgColor);
+                        if (!_fmtCache.TryGetValue(fmtKey, out var fmt))
+                        {
+                            fmt = new FormattedText(segText,
+                                System.Globalization.CultureInfo.CurrentCulture,
+                                FlowDirection.LeftToRight, typeface, fs, fgBrush);
+                            if (_fmtCache.Count > MaxCacheEntries) _fmtCache.Clear();
+                            _fmtCache[fmtKey] = fmt;
+                        }
 
                         if (item.IsChecked)
                         {
@@ -921,10 +1167,16 @@ public class TodoListEditor : Control
     private double MeasureTextWidth(string text, Typeface typeface, double fontSize)
     {
         if (text.Length == 0) return 0;
+        var key = (text, typeface, fontSize);
+        if (_measureCache.TryGetValue(key, out var cached))
+            return cached;
         var fmt = new FormattedText(text,
             System.Globalization.CultureInfo.CurrentCulture,
-            FlowDirection.LeftToRight, typeface, fontSize, Foreground);
-        return fmt.WidthIncludingTrailingWhitespace;
+            FlowDirection.LeftToRight, typeface, fontSize, Brushes.Transparent);
+        var width = fmt.WidthIncludingTrailingWhitespace;
+        if (_measureCache.Count > MaxCacheEntries) _measureCache.Clear();
+        _measureCache[key] = width;
+        return width;
     }
 
     // ---- Wrapping ----
@@ -1137,7 +1389,7 @@ public class TodoListEditor : Control
             Caret = cursor;
             SelectWordAtCaret();
             _mouseSelecting = false;
-            InvalidateMeasure();
+            InvalidateVisual();
             return;
         }
 
@@ -1153,7 +1405,7 @@ public class TodoListEditor : Control
             _mouseSelecting = true;
         }
 
-        InvalidateMeasure();
+        InvalidateVisual();
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -1163,7 +1415,7 @@ public class TodoListEditor : Control
 
         var pos = e.GetPosition(this);
         Caret = HitTestCursor(pos);
-        InvalidateMeasure();
+        InvalidateVisual();
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -1174,12 +1426,23 @@ public class TodoListEditor : Control
 
     private int HitTestItem(double y)
     {
-        for (int i = 0; i < _itemYPositions.Count; i++)
+        if (_itemYPositions.Count == 0)
+            return 0;
+
+        int lo = 0, hi = _itemYPositions.Count - 1;
+        while (lo <= hi)
         {
-            if (y >= _itemYPositions[i] && y < _itemYPositions[i] + _itemHeights[i] + LineSpacing)
-                return i;
+            int mid = (lo + hi) / 2;
+            double top = _itemYPositions[mid];
+            double bottom = top + _itemHeights[mid] + LineSpacing;
+            if (y < top)
+                hi = mid - 1;
+            else if (y >= bottom)
+                lo = mid + 1;
+            else
+                return mid;
         }
-        return Document.Items.Count - 1;
+        return Math.Clamp(lo, 0, Document.Items.Count - 1);
     }
 
     private CursorPosition HitTestCursor(Point pos)
@@ -1233,6 +1496,7 @@ public class TodoListEditor : Control
         SaveUndoState(HasSelection ? UndoActionKind.Other : UndoActionKind.Typing);
         DeleteSelection();
         InsertTextAtCaret(e.Text);
+        EnsureCaretVisible();
         e.Handled = true;
     }
 
@@ -1337,7 +1601,7 @@ public class TodoListEditor : Control
                 var docStart = CursorPosition.Start;
                 if (!shift) SelectionAnchor = docStart;
                 Caret = docStart;
-                InvalidateMeasure();
+                InvalidateVisual();
                 e.Handled = true;
                 break;
 
@@ -1346,7 +1610,7 @@ public class TodoListEditor : Control
                 var home = new CursorPosition(Caret.ItemIndex, lineStart);
                 if (!shift) SelectionAnchor = home;
                 Caret = home;
-                InvalidateMeasure();
+                InvalidateVisual();
                 e.Handled = true;
                 break;
 
@@ -1355,7 +1619,7 @@ public class TodoListEditor : Control
                 var docEnd = new CursorPosition(Document.Items.Count - 1, lastItem.TextLength);
                 if (!shift) SelectionAnchor = docEnd;
                 Caret = docEnd;
-                InvalidateMeasure();
+                InvalidateVisual();
                 e.Handled = true;
                 break;
 
@@ -1364,7 +1628,7 @@ public class TodoListEditor : Control
                 var end = new CursorPosition(Caret.ItemIndex, lineEnd);
                 if (!shift) SelectionAnchor = end;
                 Caret = end;
-                InvalidateMeasure();
+                InvalidateVisual();
                 e.Handled = true;
                 break;
 
@@ -1401,6 +1665,9 @@ public class TodoListEditor : Control
                 e.Handled = true;
                 break;
         }
+
+        if (e.Handled)
+            EnsureCaretVisible();
     }
 
     private TodoItem CurrentItem => Document.Items[Math.Clamp(Caret.ItemIndex, 0, Document.Items.Count - 1)];
@@ -1437,7 +1704,7 @@ public class TodoListEditor : Control
         }
 
         ClearSelectionNoDelete();
-        InvalidateMeasure();
+        InvalidateItem(Caret.ItemIndex);
         NotifyDocumentChanged();
     }
 
@@ -1508,7 +1775,7 @@ public class TodoListEditor : Control
         }
 
         ClearSelectionNoDelete();
-        InvalidateMeasure();
+        InvalidateItem(Caret.ItemIndex);
         NotifyDocumentChanged(ChangeKind.ImageChanged);
     }
 
@@ -1567,6 +1834,7 @@ public class TodoListEditor : Control
         Document.Items.Insert(Caret.ItemIndex + 1, newItem);
         Caret = new CursorPosition(Caret.ItemIndex + 1, 0);
         ClearSelectionNoDelete();
+        _fullLayoutRequired = true;
         InvalidateMeasure();
         NotifyDocumentChanged(ChangeKind.StructureChanged);
     }
@@ -1597,6 +1865,8 @@ public class TodoListEditor : Control
             }
 
             Caret = new CursorPosition(Caret.ItemIndex, offset - 1);
+            ClearSelectionNoDelete();
+            InvalidateItem(Caret.ItemIndex);
         }
         else if (Caret.ItemIndex > 0)
         {
@@ -1608,10 +1878,15 @@ public class TodoListEditor : Control
 
             Document.Items.RemoveAt(Caret.ItemIndex);
             Caret = new CursorPosition(Caret.ItemIndex - 1, prevLen);
+            ClearSelectionNoDelete();
+            _fullLayoutRequired = true;
+            InvalidateMeasure();
+        }
+        else
+        {
+            return;
         }
 
-        ClearSelectionNoDelete();
-        InvalidateMeasure();
         NotifyDocumentChanged();
     }
 
@@ -1637,6 +1912,9 @@ public class TodoListEditor : Control
             {
                 item.Elements.RemoveAt(elIdx);
             }
+
+            ClearSelectionNoDelete();
+            InvalidateItem(Caret.ItemIndex);
         }
         else if (Caret.ItemIndex < Document.Items.Count - 1)
         {
@@ -1644,10 +1922,15 @@ public class TodoListEditor : Control
             foreach (var el in nextItem.Elements)
                 item.Elements.Add(el);
             Document.Items.RemoveAt(Caret.ItemIndex + 1);
+            ClearSelectionNoDelete();
+            _fullLayoutRequired = true;
+            InvalidateMeasure();
+        }
+        else
+        {
+            return;
         }
 
-        ClearSelectionNoDelete();
-        InvalidateMeasure();
         NotifyDocumentChanged();
     }
 
@@ -1683,6 +1966,7 @@ public class TodoListEditor : Control
         Caret = first;
         ClearSelectionNoDelete();
         EnsureNonEmpty();
+        _fullLayoutRequired = true;
         InvalidateMeasure();
         NotifyDocumentChanged();
     }
@@ -1779,7 +2063,7 @@ public class TodoListEditor : Control
         SelectionAnchor = CursorPosition.Start;
         var lastItem = Document.Items[^1];
         Caret = new CursorPosition(Document.Items.Count - 1, lastItem.TextLength);
-        InvalidateMeasure();
+        InvalidateVisual();
     }
 
     private void ClearSelectionNoDelete()
@@ -1974,7 +2258,7 @@ public class TodoListEditor : Control
 
         Caret = newPos;
         if (!extend) SelectionAnchor = Caret;
-        InvalidateMeasure();
+        InvalidateVisual();
     }
 
     internal void MoveCaretByWord(int direction, bool extend)
@@ -2010,7 +2294,7 @@ public class TodoListEditor : Control
         }
 
         if (!extend) SelectionAnchor = Caret;
-        InvalidateMeasure();
+        InvalidateVisual();
     }
 
     private void DeleteWordBackward()
@@ -2024,6 +2308,8 @@ public class TodoListEditor : Control
             int offset = Math.Min(Caret.Offset, item.TextLength);
             DeleteRange(item, boundary, offset);
             Caret = new CursorPosition(Caret.ItemIndex, boundary);
+            ClearSelectionNoDelete();
+            InvalidateItem(Caret.ItemIndex);
         }
         else if (Caret.ItemIndex > 0)
         {
@@ -2033,10 +2319,15 @@ public class TodoListEditor : Control
                 prevItem.Elements.Add(el);
             Document.Items.RemoveAt(Caret.ItemIndex);
             Caret = new CursorPosition(Caret.ItemIndex - 1, prevLen);
+            ClearSelectionNoDelete();
+            _fullLayoutRequired = true;
+            InvalidateMeasure();
+        }
+        else
+        {
+            return;
         }
 
-        ClearSelectionNoDelete();
-        InvalidateMeasure();
         NotifyDocumentChanged();
     }
 
@@ -2049,6 +2340,8 @@ public class TodoListEditor : Control
         {
             int boundary = item.FindWordBoundaryRight(Caret.Offset);
             DeleteRange(item, Caret.Offset, boundary);
+            ClearSelectionNoDelete();
+            InvalidateItem(Caret.ItemIndex);
         }
         else if (Caret.ItemIndex < Document.Items.Count - 1)
         {
@@ -2056,10 +2349,15 @@ public class TodoListEditor : Control
             foreach (var el in nextItem.Elements)
                 item.Elements.Add(el);
             Document.Items.RemoveAt(Caret.ItemIndex + 1);
+            ClearSelectionNoDelete();
+            _fullLayoutRequired = true;
+            InvalidateMeasure();
+        }
+        else
+        {
+            return;
         }
 
-        ClearSelectionNoDelete();
-        InvalidateMeasure();
         NotifyDocumentChanged();
     }
 
@@ -2090,7 +2388,7 @@ public class TodoListEditor : Control
                     Document.Items[itemIdx], wrappedLines[targetLineIdx], useX);
                 Caret = new CursorPosition(itemIdx, newOffset);
                 if (!extend) SelectionAnchor = Caret;
-                InvalidateMeasure();
+                InvalidateVisual();
                 return;
             }
 
@@ -2142,7 +2440,7 @@ public class TodoListEditor : Control
         }
 
         if (!extend) SelectionAnchor = Caret;
-        InvalidateMeasure();
+        InvalidateVisual();
     }
 
     private static int FindCurrentWrappedLine(List<WrappedLine> wrappedLines, int offset, int direction)
@@ -2291,6 +2589,7 @@ public class TodoListEditor : Control
             Caret = ClampCursorPosition(snapshot.Caret);
             SelectionAnchor = ClampCursorPosition(snapshot.Anchor);
         }
+        _fullLayoutRequired = true;
         InvalidateMeasure();
         NotifyDocumentChanged(ChangeKind.StructureChanged);
     }
@@ -2439,7 +2738,7 @@ public class TodoListEditor : Control
 
         _changeGeneration++;
         UpdateDirtyState();
-        InvalidateMeasure();
+        InvalidateItem(idx);
         SyncMarkdownTextFromItems();
     }
 
