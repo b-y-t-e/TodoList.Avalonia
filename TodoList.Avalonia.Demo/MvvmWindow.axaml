@@ -31,18 +31,15 @@
                   VerticalAlignment="Center" IsChecked="True" />
       </StackPanel>
 
-      <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                    VerticalScrollBarVisibility="Auto">
-        <todo:TodoListEditor x:Name="Editor" DefaultFontSize="15"
-                             Items="{Binding Items}"
-                             Images="{Binding Images}"
-                             MoveCheckedToEnd="{Binding #MoveCheckedToggle.IsChecked}"
-                             CheckboxNavigation="{Binding #CheckboxNavToggle.IsChecked}">
-          <todo:TodoListEditor.DefaultFont>
-            <FontFamily>Segoe UI</FontFamily>
-          </todo:TodoListEditor.DefaultFont>
-        </todo:TodoListEditor>
-      </ScrollViewer>
+      <todo:TodoListEditor x:Name="Editor" DefaultFontSize="15"
+                           Items="{Binding Items}"
+                           Images="{Binding Images}"
+                           MoveCheckedToEnd="{Binding #MoveCheckedToggle.IsChecked}"
+                           CheckboxNavigation="{Binding #CheckboxNavToggle.IsChecked}">
+        <todo:TodoListEditor.DefaultFont>
+          <FontFamily>Segoe UI</FontFamily>
+        </todo:TodoListEditor.DefaultFont>
+      </todo:TodoListEditor>
     </DockPanel>
   </DockPanel>
 

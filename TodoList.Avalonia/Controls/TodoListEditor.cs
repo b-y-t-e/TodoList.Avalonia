@@ -26,6 +26,18 @@ public enum ImageDisplayMode { Inline, Block }
 
 public enum EditorTheme { None, Light, Dark }
 
+/// <summary>
+/// Rich-text todo-list editor control with a built-in vertical scrollbar.
+/// </summary>
+/// <remarks>
+/// The editor scrolls its own content: give it a finite height (e.g. place it in
+/// a <c>DockPanel</c> or <c>Grid</c> cell) and it shows its own scrollbar and only
+/// renders the visible items (viewport virtualization).
+///
+/// Do NOT wrap it in an external <c>ScrollViewer</c>. Doing so gives the control an
+/// unbounded height, which disables the built-in scrollbar AND virtualization, so
+/// every item is rendered on each frame — a performance regression on long lists.
+/// </remarks>
 public class TodoListEditor : Control
 {
     public static readonly StyledProperty<EditorTheme> ColorThemeProperty =
@@ -62,6 +74,14 @@ public class TodoListEditor : Control
 
     public static readonly StyledProperty<IBrush> CaretBrushProperty =
         AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(CaretBrush), Brushes.Black);
+
+    public static readonly StyledProperty<IBrush> ScrollTrackBrushProperty =
+        AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(ScrollTrackBrush),
+            new SolidColorBrush(Color.FromArgb(24, 0, 0, 0)));
+
+    public static readonly StyledProperty<IBrush> ScrollThumbBrushProperty =
+        AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(ScrollThumbBrush),
+            new SolidColorBrush(Color.FromArgb(96, 0, 0, 0)));
 
     public static readonly StyledProperty<IBrush> CheckboxCheckedBrushProperty =
         AvaloniaProperty.Register<TodoListEditor, IBrush>(nameof(CheckboxCheckedBrush), Brushes.DodgerBlue);
@@ -176,6 +196,18 @@ public class TodoListEditor : Control
     {
         get => GetValue(CaretBrushProperty);
         set => SetValue(CaretBrushProperty, value);
+    }
+
+    public IBrush ScrollTrackBrush
+    {
+        get => GetValue(ScrollTrackBrushProperty);
+        set => SetValue(ScrollTrackBrushProperty, value);
+    }
+
+    public IBrush ScrollThumbBrush
+    {
+        get => GetValue(ScrollThumbBrushProperty);
+        set => SetValue(ScrollThumbBrushProperty, value);
     }
 
     public IBrush CheckboxCheckedBrush
@@ -313,11 +345,27 @@ public class TodoListEditor : Control
     private readonly Dictionary<(string text, Typeface typeface, double fontSize, Color foreground), FormattedText> _fmtCache = new();
     private readonly HashSet<int> _dirtyItems = new();
     private bool _fullLayoutRequired = true;
-    private ScrollViewer? _parentScrollViewer;
     private double _viewportTop;
     private double _viewportBottom;
     private bool _resizePending;
     private DispatcherTimer? _resizeTimer;
+
+    // ---- Built-in vertical scrolling ----
+    private double _offset;
+    private double _viewportHeight;
+    private bool _internalScroll;
+    private bool _draggingThumb;
+    private double _thumbDragStartY;
+    private double _thumbDragStartOffset;
+    private bool _scrollBarWasVisible;
+    private const double ScrollBarWidth = 12;
+    private const double MinThumbHeight = 30;
+    private const double ThumbInset = 2;
+    private const float ThumbCornerRadius = 4;
+
+    private double MaxOffset =>
+        _internalScroll ? Math.Max(0, _desiredHeight - _viewportHeight) : 0;
+    private bool ScrollBarVisible => _internalScroll && _viewportHeight > 0 && MaxOffset > 0.5;
 
     private void ClearTextCaches()
     {
@@ -434,14 +482,6 @@ public class TodoListEditor : Control
         SyncDocumentDefaults();
     }
 
-    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        base.OnAttachedToVisualTree(e);
-        _parentScrollViewer = this.FindAncestorOfType<ScrollViewer>();
-        if (_parentScrollViewer != null)
-            _parentScrollViewer.ScrollChanged += OnParentScrollChanged;
-    }
-
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         if (_resizeTimer != null)
@@ -450,33 +490,43 @@ public class TodoListEditor : Control
             _resizeTimer.Tick -= OnResizeTimerTick;
             _resizeTimer = null;
         }
-        if (_parentScrollViewer != null)
-        {
-            _parentScrollViewer.ScrollChanged -= OnParentScrollChanged;
-            _parentScrollViewer = null;
-        }
         base.OnDetachedFromVisualTree(e);
         UnsubscribeItems(Items);
         UnsubscribeImages(Images);
         _imageCache.Clear();
     }
 
-    private void OnParentScrollChanged(object? sender, ScrollChangedEventArgs e)
+    private void UpdateViewportBounds()
     {
-        UpdateViewportBounds();
+        _viewportTop = _offset;
+        _viewportBottom = _offset + (_viewportHeight > 0 ? _viewportHeight : _desiredHeight);
+    }
+
+    private void SetOffset(double value)
+    {
+        double clamped = Math.Clamp(value, 0, MaxOffset);
+        if (Math.Abs(clamped - _offset) < 0.001) return;
+        _offset = clamped;
         InvalidateVisual();
     }
 
-    private void UpdateViewportBounds()
+    // Keep the scroll offset within bounds after a layout pass changes the content
+    // height or viewport (called from Measure/Arrange).
+    private void ClampOffset()
     {
-        if (_parentScrollViewer == null)
-        {
-            _viewportTop = 0;
-            _viewportBottom = _desiredHeight;
-            return;
-        }
-        _viewportTop = _parentScrollViewer.Offset.Y;
-        _viewportBottom = _viewportTop + _parentScrollViewer.Viewport.Height;
+        if (_offset > MaxOffset) _offset = MaxOffset;
+    }
+
+    private (double y, double height) GetThumbMetrics()
+    {
+        double track = _viewportHeight;
+        double thumbH = _desiredHeight > 0
+            ? Math.Max(MinThumbHeight, track * _viewportHeight / _desiredHeight)
+            : track;
+        thumbH = Math.Min(thumbH, track);
+        double max = MaxOffset;
+        double y = max > 0 ? (_offset / max) * (track - thumbH) : 0;
+        return (y, thumbH);
     }
 
     private (int first, int last) GetVisibleItemRange()
@@ -531,21 +581,23 @@ public class TodoListEditor : Control
 
     private void EnsureCaretVisible()
     {
-        if (_parentScrollViewer == null || _itemYPositions.Count == 0)
+        if (!_internalScroll || _viewportHeight <= 0)
+            return;
+
+        // Structural edits mark items dirty but defer the recompute to the next
+        // measure pass; flush it here so we scroll against current positions.
+        FlushPendingLayout();
+        if (_itemYPositions.Count == 0)
             return;
 
         int idx = Math.Clamp(Caret.ItemIndex, 0, _itemYPositions.Count - 1);
         double caretTop = _itemYPositions[idx];
         double caretBottom = caretTop + _itemHeights[idx];
 
-        var offset = _parentScrollViewer.Offset;
-        double viewTop = offset.Y;
-        double viewBottom = viewTop + _parentScrollViewer.Viewport.Height;
-
-        if (caretTop < viewTop)
-            _parentScrollViewer.Offset = new Vector(offset.X, caretTop);
-        else if (caretBottom > viewBottom)
-            _parentScrollViewer.Offset = new Vector(offset.X, caretBottom - _parentScrollViewer.Viewport.Height);
+        if (caretTop < _offset)
+            SetOffset(caretTop);
+        else if (caretBottom > _offset + _viewportHeight)
+            SetOffset(caretBottom - _viewportHeight);
     }
 
     private void UnsubscribeItems(IList<TodoItemData>? items)
@@ -611,6 +663,8 @@ public class TodoListEditor : Control
         else if (change.Property == BackgroundBrushProperty
             || change.Property == SelectionBrushProperty
             || change.Property == CaretBrushProperty
+            || change.Property == ScrollTrackBrushProperty
+            || change.Property == ScrollThumbBrushProperty
             || change.Property == CheckboxCheckedBrushProperty
             || change.Property == CheckboxUncheckedBrushProperty
             || change.Property == CheckboxBorderBrushProperty
@@ -658,6 +712,8 @@ public class TodoListEditor : Control
             CheckedForeground = Brushes.Gray;
             SelectionBrush = new SolidColorBrush(Color.FromArgb(80, 30, 144, 255));
             CaretBrush = Brushes.Black;
+            ScrollTrackBrush = new SolidColorBrush(Color.FromArgb(24, 0, 0, 0));
+            ScrollThumbBrush = new SolidColorBrush(Color.FromArgb(96, 0, 0, 0));
             CheckboxCheckedBrush = Brushes.DodgerBlue;
             CheckboxUncheckedBrush = Brushes.White;
             CheckboxBorderBrush = Brushes.Gray;
@@ -671,6 +727,8 @@ public class TodoListEditor : Control
             CheckedForeground = new SolidColorBrush(Color.FromRgb(120, 120, 120));
             SelectionBrush = new SolidColorBrush(Color.FromArgb(80, 60, 140, 230));
             CaretBrush = Brushes.White;
+            ScrollTrackBrush = new SolidColorBrush(Color.FromArgb(28, 255, 255, 255));
+            ScrollThumbBrush = new SolidColorBrush(Color.FromArgb(120, 255, 255, 255));
             CheckboxCheckedBrush = new SolidColorBrush(Color.FromRgb(55, 148, 255));
             CheckboxUncheckedBrush = new SolidColorBrush(Color.FromRgb(50, 50, 50));
             CheckboxBorderBrush = new SolidColorBrush(Color.FromRgb(100, 100, 100));
@@ -687,8 +745,15 @@ public class TodoListEditor : Control
 
     // ---- Layout ----
 
+    // Reserve a gutter for the scrollbar only while it is actually visible, so a
+    // list that fits on screen uses the full width. ScrollBarVisible is derived
+    // from the previous layout pass's _desiredHeight, which makes this converge
+    // without a width<->visibility feedback loop (a list crossing the one-screen
+    // boundary just re-wraps once on the next pass).
     private double AvailableContentWidth =>
-        Math.Max((_desiredWidth > 0 ? _desiredWidth : 400) - EditorPadding.Left - EditorPadding.Right, 50);
+        Math.Max((_desiredWidth > 0 ? _desiredWidth : 400)
+            - EditorPadding.Left - EditorPadding.Right
+            - (ScrollBarVisible ? ScrollBarWidth : 0), 50);
 
     private double ComputeItemHeight(List<WrappedLine> wrappedLines)
     {
@@ -699,6 +764,16 @@ public class TodoListEditor : Control
             if (li < wrappedLines.Count - 1) height += WrapLineSpacing;
         }
         return Math.Max(height, Document.DefaultFontSize + 4);
+    }
+
+    // Bring _itemYPositions/_itemHeights up to date when a recompute is pending
+    // but the next measure pass has not run yet (e.g. right after a structural edit).
+    private void FlushPendingLayout()
+    {
+        if (_fullLayoutRequired || _itemWrapping.Count != Document.Items.Count)
+            ComputeLayout();
+        else if (_dirtyItems.Count > 0)
+            ComputeIncrementalLayout();
     }
 
     private void ComputeLayout()
@@ -759,6 +834,8 @@ public class TodoListEditor : Control
         double w = double.IsInfinity(availableSize.Width) ? 400 : availableSize.Width;
         double newWidth = Math.Max(w, 200);
 
+        UpdateViewportMetrics(availableSize.Height);
+
         if (_fullLayoutRequired || _itemWrapping.Count != Document.Items.Count)
         {
             _desiredWidth = newWidth;
@@ -774,12 +851,39 @@ public class TodoListEditor : Control
             ComputeIncrementalLayout();
         }
 
-        return new Size(_desiredWidth, _desiredHeight);
+        ClampOffset();
+
+        // When the scrollbar appears/disappears the content gutter changes, so the
+        // items were wrapped at the wrong width. Force a full re-wrap on the next
+        // pass. This converges in one extra pass: showing the bar makes content
+        // narrower (still overflowing), hiding it makes content fit.
+        bool scrollBarVisible = ScrollBarVisible;
+        if (scrollBarVisible != _scrollBarWasVisible)
+        {
+            _scrollBarWasVisible = scrollBarVisible;
+            _fullLayoutRequired = true;
+            InvalidateMeasure();
+        }
+
+        // In internal-scroll mode the control fills the available height and
+        // scrolls its content; otherwise it reports the full content height.
+        double measuredHeight = _internalScroll ? availableSize.Height : _desiredHeight;
+        return new Size(_desiredWidth, measuredHeight);
+    }
+
+    // Internal scrolling is active whenever the control is given a finite height
+    // (the common case); an infinite constraint means an outer container scrolls.
+    private void UpdateViewportMetrics(double availableHeight)
+    {
+        _internalScroll = !double.IsInfinity(availableHeight);
+        _viewportHeight = _internalScroll ? availableHeight : 0;
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
         double newWidth = Math.Max(finalSize.Width, 200);
+        UpdateViewportMetrics(finalSize.Height);
+
         if (_itemWrapping.Count == 0)
         {
             _desiredWidth = newWidth;
@@ -790,7 +894,11 @@ public class TodoListEditor : Control
             _desiredWidth = newWidth;
             ComputeViewportResizeLayout();
         }
-        return new Size(_desiredWidth, Math.Max(finalSize.Height, _desiredHeight));
+
+        ClampOffset();
+
+        double height = _internalScroll ? finalSize.Height : Math.Max(finalSize.Height, _desiredHeight);
+        return new Size(_desiredWidth, height);
     }
 
     private void ComputeViewportResizeLayout()
@@ -854,6 +962,17 @@ public class TodoListEditor : Control
         var (selFirst, selLast) = CurrentSelection.Ordered();
         var selBrush = SelectionBrush;
 
+        // Content is translated by the scroll offset; the scrollbar (drawn after)
+        // stays in viewport coordinates. using() keeps the push exception-safe.
+        using (context.PushTransform(Matrix.CreateTranslation(0, -_offset)))
+            RenderContent(context, firstVisible, lastVisible, selFirst, selLast, selBrush);
+
+        RenderScrollBar(context);
+    }
+
+    private void RenderContent(DrawingContext context, int firstVisible, int lastVisible,
+        CursorPosition selFirst, CursorPosition selLast, IBrush selBrush)
+    {
         for (int i = firstVisible; i <= lastVisible && i < Document.Items.Count; i++)
         {
             var item = Document.Items[i];
@@ -954,6 +1073,19 @@ public class TodoListEditor : Control
                     new Rect(EditorPadding.Left + caretX, itemY + caretYOff, 1.5, caretLineH));
             }
         }
+    }
+
+    private void RenderScrollBar(DrawingContext context)
+    {
+        if (!ScrollBarVisible) return;
+
+        double x = Bounds.Width - ScrollBarWidth;
+        context.FillRectangle(ScrollTrackBrush, new Rect(x, 0, ScrollBarWidth, _viewportHeight));
+
+        var (thumbY, thumbH) = GetThumbMetrics();
+        context.FillRectangle(ScrollThumbBrush,
+            new Rect(x + ThumbInset, thumbY, ScrollBarWidth - ThumbInset * 2, thumbH),
+            ThumbCornerRadius);
     }
 
     private void DrawCheckbox(DrawingContext ctx, double x, double y, bool isChecked)
@@ -1345,17 +1477,50 @@ public class TodoListEditor : Control
 
     // ---- Mouse input ----
 
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    {
+        base.OnPointerWheelChanged(e);
+        if (!ScrollBarVisible || e.Delta.Y == 0) return;
+
+        double step = (Document.DefaultFontSize + LineSpacing) * 3;
+        double before = _offset;
+        SetOffset(_offset - e.Delta.Y * step);
+
+        // Only consume the event if we actually scrolled; at the extremes let it
+        // bubble so an enclosing scrollable (if any) can take over.
+        if (_offset != before) e.Handled = true;
+    }
+
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
-        Focus();
-        _goalX = -1;
 
         var pos = e.GetPosition(this);
 
+        if (ScrollBarVisible && pos.X >= Bounds.Width - ScrollBarWidth)
+        {
+            var (thumbY, thumbH) = GetThumbMetrics();
+            if (pos.Y >= thumbY && pos.Y <= thumbY + thumbH)
+            {
+                _draggingThumb = true;
+                _thumbDragStartY = pos.Y;
+                _thumbDragStartOffset = _offset;
+                e.Pointer.Capture(this);
+            }
+            else
+            {
+                SetOffset(_offset + (pos.Y < thumbY ? -_viewportHeight : _viewportHeight));
+            }
+            e.Handled = true;
+            return;
+        }
+
+        Focus();
+        _goalX = -1;
+
         if (pos.X < EditorPadding.Left - 4)
         {
-            int itemIdx = HitTestItem(pos.Y);
+            int itemIdx = HitTestItem(pos.Y + _offset);
             if (itemIdx >= 0 && itemIdx < Document.Items.Count)
             {
                 if (CheckboxNavigation)
@@ -1400,12 +1565,25 @@ public class TodoListEditor : Control
             _mouseSelecting = true;
         }
 
+        e.Pointer.Capture(this);
         InvalidateVisual();
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
+
+        if (_draggingThumb)
+        {
+            var p = e.GetPosition(this);
+            var (_, thumbH) = GetThumbMetrics();
+            double usable = _viewportHeight - thumbH;
+            if (usable > 0)
+                SetOffset(_thumbDragStartOffset + (p.Y - _thumbDragStartY) / usable * MaxOffset);
+            e.Handled = true;
+            return;
+        }
+
         if (!_mouseSelecting) return;
 
         var pos = e.GetPosition(this);
@@ -1417,6 +1595,8 @@ public class TodoListEditor : Control
     {
         base.OnPointerReleased(e);
         _mouseSelecting = false;
+        _draggingThumb = false;
+        e.Pointer.Capture(null);
     }
 
     private int HitTestItem(double y)
@@ -1442,6 +1622,8 @@ public class TodoListEditor : Control
 
     private CursorPosition HitTestCursor(Point pos)
     {
+        // Translate viewport coordinates into content coordinates.
+        pos = pos.WithY(pos.Y + _offset);
         int itemIdx = HitTestItem(pos.Y);
         if (itemIdx < 0) return CursorPosition.Start;
         itemIdx = Math.Clamp(itemIdx, 0, Document.Items.Count - 1);
